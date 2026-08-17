@@ -1,0 +1,18 @@
+MEU COFRE v0.2 - NOTAS DE SEGURANCA
+===================================
+
+- Conteudo do cofre: AES-256-GCM via WebCrypto.
+- Chave do cofre: aleatoria, 256 bits.
+- Senha mestra: PBKDF2-HMAC-SHA-256, 600.000 iteracoes, salt aleatorio de 256 bits.
+- YubiKey/chave de acesso: WebAuthn PRF; saida PRF passa por HKDF-SHA-256 para criar a chave de embrulho.
+- Senha + YubiKey: deriva 256 bits da senha por PBKDF2, concatena com a saida PRF de 256 bits e aplica HKDF-SHA-256 antes de AES-GCM. Assim, o slot de dois fatores nao abre com apenas um dos dois segredos.
+- A senha mestra permanece em um slot separado para recuperacao de emergencia.
+- Nenhum script, fonte ou CDN externo e carregado pelo aplicativo.
+- O cofre criptografado fica no IndexedDB do aparelho/origem HTTPS.
+- O backup .mcvault contem apenas material criptografado e metadados publicos dos metodos de desbloqueio.
+
+LIMITES
+- Uma PWA executa codigo entregue pela origem HTTPS. Comprometimento da conta/hospedagem pode representar risco numa atualizacao futura.
+- JavaScript nao garante apagamento fisico de memoria; wipe() e apenas melhor esforco.
+- Aparelho comprometido, jailbreak, malware, captura de tela/teclado e falhas do navegador estao fora do controle do app.
+- Esta versao ainda nao passou por auditoria criptografica independente.

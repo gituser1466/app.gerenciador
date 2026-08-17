@@ -106,3 +106,9 @@ textarea { min-height:110px; resize:vertical; }
   .screen-title { font-size:25px; }
   .actions .btn { flex-basis:100%; }
 }
+.recovery-details { border:1px solid var(--line); border-radius:14px; background:#0d1118; overflow:hidden; }
+.recovery-details summary { cursor:pointer; padding:12px 14px; color:var(--muted); font-weight:700; user-select:none; }
+.recovery-details[open] summary { border-bottom:1px solid var(--line); color:var(--text); }
+.recovery-body { padding:14px; }
+#auth-slots .row { flex-wrap:wrap; }
+#auth-slots .row-main { flex:1 1 280px; }

@@ -7,7 +7,7 @@ import {
 } from './utils.js';
 
 function ensureSupport() {
-  if (!window.isSecureContext) throw new Error('Face ID e YubiKey exigem HTTPS (contexto seguro).');
+  if (!window.isSecureContext) throw new Error('Chaves de acesso e YubiKey exigem HTTPS (contexto seguro).');
   if (!('PublicKeyCredential' in window) || !navigator.credentials) throw new Error('WebAuthn não está disponível neste navegador.');
 }
 
@@ -70,7 +70,7 @@ export async function registerPrfCredential(record, kind) {
   const transports = credential.response?.getTransports?.() || [];
   const registration = {
     kind,
-    label: isPlatform ? 'Face ID / dispositivo' : 'YubiKey / chave FIDO2',
+    label: isPlatform ? 'Este iPhone / chave de acesso' : 'YubiKey / chave FIDO2',
     credentialId,
     transports,
     prfSalt: bytesToBase64(prfSalt)

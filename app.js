@@ -1,11 +1,16 @@
 import { getVaultRecord, putVaultRecord } from './storage.js';
 import {
   changeMasterPassword,
+  createPasswordPrfSlot,
   createPrfSlot,
   createRecord,
+  getUnlockPolicy,
   removeSlot,
   saveRecord,
+  setUnlockPolicy,
+  UNLOCK_POLICIES,
   unlockPassword,
+  unlockPasswordPrf,
   unlockPrf,
   validateRecord
 } from './crypto-vault.js';
@@ -94,6 +99,8 @@ function wireEvents() {
   $('setup-import-file').addEventListener('change', (event) => importBackupFile(event.target.files?.[0], false));
   $('unlock-password-btn').addEventListener('click', unlockWithPassword);
   $('unlock-password').addEventListener('keydown', (event) => { if (event.key === 'Enter') unlockWithPassword(); });
+  $('unlock-recovery-password-btn').addEventListener('click', unlockWithRecoveryPassword);
+  $('unlock-recovery-password').addEventListener('keydown', (event) => { if (event.key === 'Enter') unlockWithRecoveryPassword(); });
   $('unlock-import').addEventListener('click', () => $('unlock-import-file').click());
   $('unlock-import-file').addEventListener('change', (event) => importBackupFile(event.target.files?.[0], false));
   $('lock-btn').addEventListener('click', () => lockVault('Cofre bloqueado.'));
@@ -118,6 +125,8 @@ function wireEvents() {
 
   $('add-faceid').addEventListener('click', () => addWebAuthnMethod('platform'));
   $('add-yubikey').addEventListener('click', () => addWebAuthnMethod('security-key'));
+  $('save-unlock-policy').addEventListener('click', saveUnlockPolicy);
+  $('create-twofactor').addEventListener('click', createTwoFactorMethod);
   $('change-master').addEventListener('click', changeMaster);
   $('export-backup').addEventListener('click', exportBackup);
   $('restore-backup').addEventListener('click', () => $('restore-backup-file').click());
@@ -178,16 +187,81 @@ async function unlockWithPassword() {
   }
 }
 
+function authButtonLabel(slot) {
+  if (slot.type === 'password-webauthn-prf') return slot.label || 'Senha + YubiKey';
+  if (slot.kind === 'platform') return slot.label || 'Este iPhone / chave de acesso';
+  return slot.label || 'YubiKey / chave FIDO2';
+}
+
+function appendPrfButton(container, slot, alternative = false) {
+  const btn = document.createElement('button');
+  btn.className = alternative ? 'btn ghost' : (slot.kind === 'security-key' ? 'btn' : 'btn secondary');
+  btn.textContent = `Desbloquear com ${authButtonLabel(slot)}`;
+  btn.addEventListener('click', () => unlockWithPrfSlot(slot, btn));
+  container.append(btn);
+}
+
+function appendTwoFactorButton(container, slot) {
+  const btn = document.createElement('button');
+  btn.className = 'btn';
+  btn.textContent = `Desbloquear com ${authButtonLabel(slot)}`;
+  btn.addEventListener('click', () => unlockWithPasswordPrfSlot(slot, btn));
+  container.append(btn);
+}
+
 function renderUnlockMethods() {
-  const box = $('unlock-prf-buttons');
-  box.replaceChildren();
-  for (const slot of record?.slots || []) {
-    if (slot.type !== 'webauthn-prf') continue;
-    const btn = document.createElement('button');
-    btn.className = slot.kind === 'platform' ? 'btn secondary' : 'btn ghost';
-    btn.textContent = slot.kind === 'platform' ? 'Desbloquear com Face ID / dispositivo' : 'Desbloquear com YubiKey / chave FIDO2';
-    btn.addEventListener('click', () => unlockWithPrfSlot(slot, btn));
-    box.append(btn);
+  const normal = $('unlock-prf-buttons');
+  const alternatives = $('unlock-alternative-buttons');
+  const twoFactor = $('unlock-twofactor-buttons');
+  normal.replaceChildren();
+  alternatives.replaceChildren();
+  twoFactor.replaceChildren();
+
+  const policy = getUnlockPolicy(record);
+  $('unlock-any-area').hidden = policy === UNLOCK_POLICIES.PASSWORD_YUBIKEY;
+  $('unlock-twofactor-area').hidden = policy !== UNLOCK_POLICIES.PASSWORD_YUBIKEY;
+  $('unlock-password-area').hidden = policy === UNLOCK_POLICIES.YUBIKEY;
+  $('unlock-recovery').hidden = policy === UNLOCK_POLICIES.ANY;
+
+  if (policy === UNLOCK_POLICIES.ANY) {
+    $('unlock-policy-note').textContent = 'Você pode abrir com a senha mestra, uma YubiKey cadastrada ou a chave de acesso deste iPhone.';
+  } else if (policy === UNLOCK_POLICIES.YUBIKEY) {
+    $('unlock-policy-note').textContent = 'Acesso normal pela YubiKey. A senha mestra fica disponível somente na área de recuperação.';
+  } else {
+    $('unlock-policy-note').textContent = 'Acesso normal exige a senha mestra e uma YubiKey. A senha de recuperação continua disponível em emergência.';
+  }
+
+  const standalone = (record?.slots || []).filter((slot) => slot.type === 'webauthn-prf');
+  const combined = (record?.slots || []).filter((slot) => slot.type === 'password-webauthn-prf');
+
+  if (policy === UNLOCK_POLICIES.ANY) {
+    standalone.forEach((slot) => appendPrfButton(normal, slot));
+  } else if (policy === UNLOCK_POLICIES.YUBIKEY) {
+    standalone.filter((slot) => slot.kind === 'security-key').forEach((slot) => appendPrfButton(normal, slot));
+    standalone.filter((slot) => slot.kind !== 'security-key').forEach((slot) => appendPrfButton(alternatives, slot, true));
+  } else {
+    combined.filter((slot) => slot.kind === 'security-key').forEach((slot) => appendTwoFactorButton(twoFactor, slot));
+    standalone.forEach((slot) => appendPrfButton(alternatives, slot, true));
+  }
+}
+
+async function unlockWithRecoveryPassword() {
+  const password = $('unlock-recovery-password').value;
+  if (!password) return;
+  const btn = $('unlock-recovery-password-btn');
+  btn.disabled = true;
+  btn.textContent = 'Verificando recuperação...';
+  $('unlock-error').textContent = '';
+  try {
+    session = await unlockPassword(record, password);
+    $('unlock-recovery-password').value = '';
+    enterApp();
+    showToast('Cofre aberto pela recuperação com senha mestra.', 'success');
+  } catch (error) {
+    $('unlock-error').textContent = error.message || String(error);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Usar senha de recuperação';
   }
 }
 
@@ -212,11 +286,39 @@ async function unlockWithPrfSlot(slot, button) {
   }
 }
 
+async function unlockWithPasswordPrfSlot(slot, button) {
+  const password = $('unlock-2fa-password').value;
+  if (!password) {
+    $('unlock-error').textContent = 'Digite a senha mestra antes de tocar na YubiKey.';
+    return;
+  }
+  button.disabled = true;
+  const original = button.textContent;
+  button.textContent = 'Aguardando YubiKey...';
+  $('unlock-error').textContent = '';
+  try {
+    const secret = await evaluatePrf(slot);
+    try {
+      session = await unlockPasswordPrf(record, slot, password, secret);
+    } finally {
+      wipe(secret);
+    }
+    $('unlock-2fa-password').value = '';
+    enterApp();
+  } catch (error) {
+    $('unlock-error').textContent = error.message || String(error);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
 function enterApp() {
   if (!session) return;
   setPublicScreen('app');
   $('app-vault-name').textContent = session.vault.name || 'Meu Cofre';
   $('search').value = '';
+  ['unlock-password', 'unlock-recovery-password', 'unlock-2fa-password'].forEach((id) => { if ($(id)) $(id).value = ''; });
   renderEntries();
   renderSecurity();
   renderSettings();
@@ -464,17 +566,24 @@ async function persistVault() {
 
 async function addWebAuthnMethod(kind) {
   if (!session) return;
-  const label = kind === 'platform' ? 'Face ID / dispositivo' : 'YubiKey / chave FIDO2';
-  if (record.slots.some((slot) => slot.type === 'webauthn-prf' && slot.kind === kind)) {
-    return showToast(`${label} já está cadastrado. Remova o método antigo antes de criar outro.`, 'error');
+  const baseLabel = kind === 'platform' ? 'este iPhone / chave de acesso' : 'YubiKey / chave FIDO2';
+  if (kind === 'platform' && record.slots.some((slot) => slot.type === 'webauthn-prf' && slot.kind === 'platform')) {
+    return showToast('Este iPhone / chave de acesso já está cadastrado. Remova o método antigo antes de criar outro.', 'error');
   }
-  if (!confirm(`Cadastrar ${label}? Este método ficará vinculado ao domínio HTTPS onde o app está instalado. Mantenha a senha mestra e um backup criptografado.`)) return;
+  if (!confirm(`Cadastrar ${baseLabel}? O método ficará vinculado ao domínio HTTPS atual. Mantenha a senha mestra e um backup criptografado.`)) return;
   const button = kind === 'platform' ? $('add-faceid') : $('add-yubikey');
   const original = button.textContent;
   button.disabled = true;
   button.textContent = 'Aguardando autenticação...';
   try {
+    let requestedLabel = 'Este iPhone / chave de acesso';
+    if (kind === 'security-key') {
+      const keyNumber = record.slots.filter((slot) => slot.type === 'webauthn-prf' && slot.kind === 'security-key').length + 1;
+      const chosen = prompt('Nome para identificar esta chave:', `YubiKey ${keyNumber}`);
+      requestedLabel = (chosen || '').trim().slice(0, 80) || `YubiKey ${keyNumber}`;
+    }
     const { registration, prfSecret } = await registerPrfCredential(record, kind);
+    registration.label = requestedLabel;
     try {
       const slot = await createPrfSlot(record, session.vaultKey, registration, prfSecret);
       const next = structuredClone(record);
@@ -487,12 +596,85 @@ async function addWebAuthnMethod(kind) {
     }
     renderSecurity();
     renderUnlockMethods();
-    showToast(`${label} cadastrado.`, 'success');
+    showToast(`${registration.label} cadastrada com sucesso.`, 'success');
   } catch (error) {
     showToast(error.message || String(error), 'error');
   } finally {
     button.disabled = false;
     button.textContent = original;
+  }
+}
+
+async function createTwoFactorMethod() {
+  if (!session) return;
+  const slotId = $('twofactor-yubikey-select').value;
+  const password = $('twofactor-master-password').value;
+  const source = record.slots.find((slot) => slot.id === slotId && slot.type === 'webauthn-prf' && slot.kind === 'security-key');
+  if (!source) return showToast('Cadastre ou selecione uma YubiKey primeiro.', 'error');
+  if (!password) return showToast('Informe a senha mestra atual.', 'error');
+  if (record.slots.some((slot) => slot.type === 'password-webauthn-prf' && slot.credentialId === source.credentialId)) {
+    return showToast('Já existe um método Senha + YubiKey para essa chave.', 'error');
+  }
+  const button = $('create-twofactor');
+  button.disabled = true;
+  button.textContent = 'Verificando senha...';
+  let verified = null;
+  try {
+    verified = await unlockPassword(record, password);
+    if (verified?.vaultKey) wipe(verified.vaultKey);
+    verified = null;
+    button.textContent = 'Aguardando YubiKey...';
+    const secret = await evaluatePrf(source);
+    try {
+      const registration = {
+        kind: source.kind,
+        label: source.label || 'YubiKey',
+        credentialId: source.credentialId,
+        transports: source.transports || [],
+        prfSalt: source.prfSalt
+      };
+      const combined = await createPasswordPrfSlot(record, session.vaultKey, registration, secret, password);
+      let next = structuredClone(record);
+      next.slots.push(combined);
+      next.updatedAt = new Date().toISOString();
+      next = setUnlockPolicy(next, UNLOCK_POLICIES.PASSWORD_YUBIKEY);
+      record = next;
+      await putVaultRecord(record);
+    } finally {
+      wipe(secret);
+    }
+    $('twofactor-master-password').value = '';
+    renderSecurity();
+    renderUnlockMethods();
+    showToast('Senha + YubiKey ativado como acesso normal.', 'success');
+  } catch (error) {
+    if (verified?.vaultKey) wipe(verified.vaultKey);
+    showToast(error.message || String(error), 'error');
+  } finally {
+    $('twofactor-master-password').value = '';
+    button.disabled = false;
+    button.textContent = 'Criar método de dois fatores';
+  }
+}
+
+async function saveUnlockPolicy() {
+  if (!session) return;
+  const policy = $('unlock-policy-select').value;
+  const names = {
+    [UNLOCK_POLICIES.ANY]: 'Senha, YubiKey ou este iPhone',
+    [UNLOCK_POLICIES.YUBIKEY]: 'YubiKey principal',
+    [UNLOCK_POLICIES.PASSWORD_YUBIKEY]: 'Senha + YubiKey'
+  };
+  if (!confirm(`Aplicar o modo “${names[policy] || policy}”? A senha mestra continuará disponível como recuperação de emergência.`)) return;
+  try {
+    record = setUnlockPolicy(record, policy);
+    await putVaultRecord(record);
+    renderSecurity();
+    renderUnlockMethods();
+    showToast('Política de desbloqueio atualizada.', 'success');
+  } catch (error) {
+    showToast(error.message || String(error), 'error');
+    renderSecurity();
   }
 }
 
@@ -520,15 +702,24 @@ async function renderSecurity() {
     main.className = 'row-main';
     const title = document.createElement('div');
     title.className = 'row-title';
-    title.textContent = slot.type === 'password' ? 'Senha mestra' : slot.label || 'WebAuthn';
+    if (slot.type === 'password') title.textContent = 'Senha mestra';
+    else title.textContent = slot.label || (slot.kind === 'platform' ? 'Este iPhone / chave de acesso' : 'YubiKey');
     const sub = document.createElement('div');
     sub.className = 'row-sub';
-    sub.textContent = slot.type === 'password'
-      ? `PBKDF2-SHA-256 · ${Number(slot.kdf?.iterations || 0).toLocaleString('pt-BR')} iterações`
-      : `WebAuthn PRF · cadastrado em ${formatDateTime(slot.createdAt)}`;
+    if (slot.type === 'password') {
+      sub.textContent = `PBKDF2-SHA-256 · ${Number(slot.kdf?.iterations || 0).toLocaleString('pt-BR')} iterações · recuperação`;
+    } else if (slot.type === 'password-webauthn-prf') {
+      sub.textContent = `Dois fatores criptográficos · PBKDF2 + WebAuthn PRF/HKDF · ${formatDateTime(slot.createdAt)}`;
+    } else {
+      sub.textContent = `WebAuthn PRF/HKDF · cadastrado em ${formatDateTime(slot.createdAt)}`;
+    }
     main.append(title, sub);
     row.append(main);
     if (slot.type !== 'password') {
+      const tag = document.createElement('span');
+      tag.className = 'pill ok';
+      tag.textContent = slot.type === 'password-webauthn-prf' ? '2 fatores' : (slot.kind === 'security-key' ? 'YubiKey' : 'iPhone');
+      row.append(tag);
       const remove = document.createElement('button');
       remove.className = 'btn danger small';
       remove.textContent = 'Remover';
@@ -542,6 +733,33 @@ async function renderSecurity() {
     }
     box.append(row);
   }
+
+  $('unlock-policy-select').value = getUnlockPolicy(record);
+
+  const twoFactorSelect = $('twofactor-yubikey-select');
+  twoFactorSelect.replaceChildren();
+  const used = new Set(record.slots.filter((slot) => slot.type === 'password-webauthn-prf').map((slot) => slot.credentialId));
+  const keys = record.slots.filter((slot) => slot.type === 'webauthn-prf' && slot.kind === 'security-key' && !used.has(slot.credentialId));
+  if (!keys.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'Nenhuma YubiKey disponível';
+    twoFactorSelect.append(option);
+    $('create-twofactor').disabled = true;
+  } else {
+    for (const slot of keys) {
+      const option = document.createElement('option');
+      option.value = slot.id;
+      option.textContent = slot.label || 'YubiKey';
+      twoFactorSelect.append(option);
+    }
+    $('create-twofactor').disabled = false;
+  }
+
+  const backup = $('backup-status');
+  backup.textContent = record.lastBackupAt
+    ? `Último backup registrado: ${formatDateTime(record.lastBackupAt)}.`
+    : 'Nenhum backup exportado foi registrado nesta instalação.';
 
   const diagnostics = $('security-diagnostics');
   diagnostics.replaceChildren();
@@ -591,12 +809,21 @@ async function changeMaster() {
   }
 }
 
-function exportBackup() {
-  validateRecord(record);
-  const pretty = JSON.stringify(record, null, 2);
-  const stamp = new Date().toISOString().slice(0, 10);
-  downloadBlob(new Blob([pretty], { type: 'application/json' }), `MeuCofre-${stamp}.mcvault`);
-  showToast('Backup criptografado exportado.', 'success');
+async function exportBackup() {
+  try {
+    validateRecord(record);
+    const next = structuredClone(record);
+    next.lastBackupAt = new Date().toISOString();
+    record = next;
+    await putVaultRecord(record);
+    const pretty = JSON.stringify(record, null, 2);
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadBlob(new Blob([pretty], { type: 'application/json' }), `MeuCofre-${stamp}.mcvault`);
+    renderSecurity();
+    showToast('Backup criptografado exportado.', 'success');
+  } catch (error) {
+    showToast(`Falha ao exportar backup: ${error.message || error}`, 'error');
+  }
 }
 
 async function importBackupFile(file, fromUnlockedApp) {

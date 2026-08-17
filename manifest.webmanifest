@@ -2,7 +2,7 @@
   "id": "./",
   "name": "Meu Cofre",
   "short_name": "Meu Cofre",
-  "description": "Gerenciador de senhas local, offline e criptografado.",
+  "description": "Gerenciador de senhas local, offline e criptografado com suporte a YubiKey.",
   "lang": "pt-BR",
   "start_url": "./",
   "scope": "./",

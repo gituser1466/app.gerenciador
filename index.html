@@ -36,7 +36,7 @@
         <button class="btn" id="setup-create">Criar cofre criptografado</button>
         <button class="btn secondary" id="setup-import">Importar backup .mcvault</button>
         <input type="file" id="setup-import-file" accept=".mcvault,application/json" hidden>
-        <p class="security-note">Versão inicial para testes. Antes de guardar credenciais críticas, mantenha backup e valide o funcionamento no seu iPhone.</p>
+        <p class="security-note">Versão 0.2 para testes avançados. Antes de guardar credenciais críticas, mantenha backup e valide o funcionamento no seu iPhone.</p>
       </div>
     </section>
 
@@ -46,9 +46,32 @@
           <h2 class="screen-title">Desbloquear</h2>
           <p class="screen-subtitle">O cofre é descriptografado apenas na memória deste aparelho.</p>
         </div>
-        <label>Senha mestra<input id="unlock-password" type="password" autocomplete="current-password"></label>
-        <button class="btn" id="unlock-password-btn">Desbloquear com senha</button>
-        <div id="unlock-prf-buttons" class="stack"></div>
+        <div id="unlock-policy-note" class="security-note"></div>
+
+        <div id="unlock-any-area" class="stack">
+          <div id="unlock-password-area" class="stack">
+            <label>Senha mestra<input id="unlock-password" type="password" autocomplete="current-password"></label>
+            <button class="btn" id="unlock-password-btn">Desbloquear com senha</button>
+          </div>
+          <div id="unlock-prf-buttons" class="stack"></div>
+        </div>
+
+        <div id="unlock-twofactor-area" class="stack" hidden>
+          <label>Senha mestra<input id="unlock-2fa-password" type="password" autocomplete="current-password"></label>
+          <div id="unlock-twofactor-buttons" class="stack"></div>
+          <p class="hint">Neste modo, a chave que abre o cofre é protegida criptograficamente pela combinação da senha mestra com a YubiKey.</p>
+        </div>
+
+        <details id="unlock-recovery" class="recovery-details">
+          <summary>Recuperação e métodos alternativos</summary>
+          <div class="stack recovery-body">
+            <label>Senha mestra de recuperação<input id="unlock-recovery-password" type="password" autocomplete="current-password"></label>
+            <button class="btn secondary" id="unlock-recovery-password-btn">Usar senha de recuperação</button>
+            <div id="unlock-alternative-buttons" class="stack"></div>
+            <p class="hint">A senha mestra é mantida como recuperação para evitar perda definitiva do cofre se a YubiKey for perdida ou o domínio mudar.</p>
+          </div>
+        </details>
+
         <button class="btn secondary" id="unlock-import">Restaurar backup .mcvault</button>
         <input type="file" id="unlock-import-file" accept=".mcvault,application/json" hidden>
         <div id="unlock-error" class="error" role="alert"></div>
@@ -92,11 +115,34 @@
           <div class="card" id="auth-slots"></div>
         </div>
         <div class="section">
+          <h3>Como abrir o cofre</h3>
+          <div class="card stack">
+            <label>Política de desbloqueio
+              <select id="unlock-policy-select">
+                <option value="any">Senha, YubiKey ou este iPhone</option>
+                <option value="yubikey">YubiKey principal; senha somente para recuperação</option>
+                <option value="password-yubikey">Senha + YubiKey (dois fatores)</option>
+              </select>
+            </label>
+            <button class="btn secondary" id="save-unlock-policy">Aplicar política</button>
+            <p class="hint">Mesmo nos modos com YubiKey, a senha mestra permanece como recuperação de emergência. Isso reduz o risco de perder o cofre definitivamente.</p>
+          </div>
+        </div>
+        <div class="section">
           <h3>Adicionar método</h3>
           <div class="card stack">
-            <button class="btn" id="add-faceid">Adicionar Face ID / dispositivo</button>
-            <button class="btn secondary" id="add-yubikey">Adicionar YubiKey / chave FIDO2</button>
-            <p class="hint">Esses métodos usam WebAuthn PRF quando o navegador e o autenticador oferecem suporte. A senha mestra continua como recuperação.</p>
+            <button class="btn" id="add-yubikey">Adicionar YubiKey / chave FIDO2</button>
+            <button class="btn secondary" id="add-faceid">Adicionar este iPhone / chave de acesso</button>
+            <p class="hint">Você pode cadastrar mais de uma YubiKey. Depois de cadastrá-la, use “Criar 2 fatores” para exigir senha + essa YubiKey no desbloqueio normal.</p>
+          </div>
+        </div>
+        <div class="section">
+          <h3>Senha + YubiKey</h3>
+          <div class="card stack">
+            <label>YubiKey cadastrada<select id="twofactor-yubikey-select"></select></label>
+            <label>Senha mestra atual<input id="twofactor-master-password" type="password" autocomplete="current-password"></label>
+            <button class="btn secondary" id="create-twofactor">Criar método de dois fatores</button>
+            <p class="hint">O aplicativo verificará sua senha e pedirá um toque na YubiKey. A nova proteção usa os dois segredos para embrulhar a chave do cofre.</p>
           </div>
         </div>
         <div class="section">
@@ -105,6 +151,7 @@
             <label>Nova senha<input id="new-master" type="password" autocomplete="new-password"></label>
             <label>Repetir nova senha<input id="new-master2" type="password" autocomplete="new-password"></label>
             <button class="btn secondary" id="change-master">Trocar senha mestra</button>
+            <p class="hint">Se houver um método “Senha + YubiKey”, remova-o antes de trocar a senha e cadastre-o novamente depois.</p>
           </div>
         </div>
         <div class="section">
@@ -115,6 +162,7 @@
           <h3>Backup</h3>
           <div class="card stack">
             <button class="btn secondary" id="export-backup">Exportar backup criptografado</button>
+            <div id="backup-status" class="hint"></div>
             <button class="btn ghost" id="restore-backup">Restaurar backup</button>
             <input type="file" id="restore-backup-file" accept=".mcvault,application/json" hidden>
             <p class="hint">O backup contém somente o cofre criptografado e os dados públicos necessários para desbloqueá-lo.</p>
@@ -135,8 +183,8 @@
         <div class="section">
           <h3>Sobre</h3>
           <div class="card stack">
-            <div class="row"><div class="row-main"><div class="row-title">Versão</div><div class="row-sub">0.1.0 — protótipo funcional</div></div></div>
-            <div class="security-note">Este projeto é um gerenciador de senhas em desenvolvimento. O cofre local usa AES-GCM e PBKDF2 via WebCrypto. Compatibilidade KDBX/Argon2 será adicionada em uma etapa posterior, após testes específicos.</div>
+            <div class="row"><div class="row-main"><div class="row-title">Versão</div><div class="row-sub">0.2.0 — YubiKey e dois fatores</div></div></div>
+            <div class="security-note">O cofre local usa AES-256-GCM. A senha mestra usa PBKDF2-SHA-256 e a YubiKey usa WebAuthn PRF/HKDF. O modo Senha + YubiKey combina os dois segredos antes de liberar a chave do cofre. Compatibilidade KDBX/Argon2id permanece planejada para uma etapa posterior com testes específicos.</div>
           </div>
         </div>
       </section>

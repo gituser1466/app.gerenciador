@@ -1,16 +1,34 @@
-MEU COFRE - VERSAO PARA GITHUB PAGES SEM PASTAS
+MEU COFRE PWA v0.2.0
+====================
 
-Esta versao foi preparada para quem nao consegue enviar pastas pelo site do GitHub.
+ATUALIZACAO SEGURA A PARTIR DA v0.1.x
 
-IMPORTANTE:
-1. Extraia este ZIP no computador.
-2. Abra o repositorio no GitHub.
-3. Clique em Add file > Upload files.
-4. Selecione TODOS os arquivos extraidos de uma vez (Ctrl+A).
-5. Arraste-os para a pagina ou clique em choose your files.
-6. Clique em Commit changes.
-7. Em Settings > Pages, selecione Deploy from a branch > main > /(root) > Save.
+1. ANTES DE ATUALIZAR, abra o Meu Cofre no iPhone e exporte um backup .mcvault.
+2. Extraia este ZIP no computador.
+3. No mesmo repositorio GitHub que ja publica o Meu Cofre, use Add file > Upload files.
+4. Envie TODOS os arquivos desta pasta para a raiz do repositorio e confirme o commit.
+5. Nao mude o nome do repositorio, usuario GitHub, dominio ou URL do Pages durante esta atualizacao.
+6. Aguarde o GitHub Pages publicar a alteracao.
+7. Abra o Meu Cofre pelo icone no iPhone. Quando aparecer "Atualizacao disponivel", toque em "Atualizar agora".
+8. Confirme que aparece Versao 0.2.0 em Ajustes > Sobre.
+9. Teste a YubiKey com credenciais de teste antes de depender do novo modo de dois fatores.
 
-O arquivo index.html deve aparecer na raiz do repositorio.
-Nao envie o ZIP; envie os arquivos extraidos.
-Nao ha nenhuma pasta nesta versao.
+O cofre ja existente permanece no IndexedDB do mesmo dominio. Os arquivos do site nao contem suas senhas.
+
+NOVIDADES DA v0.2.0
+- YubiKey principal com senha mestra escondida na area de recuperacao.
+- Modo Senha + YubiKey com combinacao criptografica dos dois fatores.
+- Cadastro de mais de uma YubiKey, para permitir chave reserva.
+- Terminologia correta para o iPhone: "Este iPhone / chave de acesso".
+- Politica de desbloqueio configuravel.
+- Registro da data do ultimo backup exportado.
+- Compatibilidade com cofres criados pela v0.1.x.
+
+IMPORTANTE SOBRE RECUPERACAO
+Mesmo no modo "YubiKey principal" ou "Senha + YubiKey", a senha mestra continua existindo como recuperacao de emergencia. Isso e proposital para evitar perda definitiva do cofre se uma chave for perdida ou se a origem HTTPS mudar.
+
+NAO MUDE O DOMINIO/URL SEM ANTES EXPORTAR BACKUP
+Credenciais WebAuthn sao vinculadas a origem/RP do site. Uma mudanca de dominio pode impedir o uso dos metodos WebAuthn antigos. A senha mestra e o backup .mcvault sao a recuperacao portatil.
+
+KDBX
+Esta versao ainda usa o formato .mcvault do prototipo. KDBX/Argon2id nao foi implementado nesta etapa.
