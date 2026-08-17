@@ -163,3 +163,10 @@ textarea { min-height:110px; resize:vertical; }
   #screen-app { padding-left:18px; padding-right:18px; }
   #screen-app .app-scroll { left:18px; right:18px; }
 }
+.card-gap { margin-top: 10px; }
+.checkbox-label { display:flex; grid-template-columns:auto 1fr; align-items:center; }
+.checkbox-label input { width:auto; }
+#kdbx-summary .row, #security-diagnostics .row { flex-wrap:wrap; }
+.status-grid { display:grid; gap:0; }
+.danger-note { border-left-color:var(--danger); background:#25161a; color:#ffd7db; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior:auto!important; transition:none!important; animation:none!important; } }

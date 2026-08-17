@@ -1,39 +1,19 @@
-MEU COFRE PWA v0.2.2 - CORRECAO DE ATUALIZACAO NO IPHONE
-================================================================
+MEU COFRE 1.0.0 - KDBX 4.1
 
-POR QUE ESTA VERSAO EXISTE
-A v0.1/v0.2 usava cache-first para a pagina principal. Em alguns iPhones, o
-Service Worker continuava exibindo a versao antiga mesmo depois do GitHub Pages
-publicar os arquivos novos. A v0.2.2 corrige especificamente esse fluxo.
+ARQUIVOS PARA GITHUB PAGES
+1. Faça backup .mcvault da v0.2.2 antes de atualizar.
+2. Envie TODOS os arquivos deste pacote para a RAIZ do MESMO repositorio.
+3. Nao mude o endereco GitHub Pages.
+4. Aguarde o deploy e abra o PWA com internet.
+5. Aceite o banner de atualizacao.
+6. Desbloqueie o cofre antigo e use Seguranca > Migracao obrigatoria.
+7. Guarde o .mcvault antigo, o novo .kdbx e a .key de recuperacao.
+8. Teste YubiKey e recuperacao antes de apagar qualquer backup.
 
-COMO ATUALIZAR SEM PERDER O COFRE
-1. Abra a versao antiga no iPhone e exporte um backup .mcvault antes de qualquer alteracao.
-2. No MESMO repositorio e na MESMA URL do GitHub Pages, envie TODOS os arquivos deste ZIP para a raiz e confirme o commit.
-3. Aguarde o GitHub Pages concluir o deploy.
-4. Com internet ativa, abra o icone Meu Cofre, deixe aberto por cerca de 10 segundos, feche completamente e abra novamente.
-5. A tela inicial deve mostrar "v0.2.2" abaixo de Meu Cofre. Em Ajustes > Sobre deve aparecer 0.2.2.
-6. NAO mude usuario GitHub, nome do repositorio, dominio ou URL. WebAuthn/YubiKey e vinculado a origem HTTPS.
-
-SE CONTINUAR NA VERSAO ANTIGA
-Nao apague o app nem os dados do Safari antes de ter um backup .mcvault confirmado.
-Com o backup salvo, pode-se fazer uma limpeza controlada do site e reinstalar a PWA.
-
-O QUE NAO MUDA
-- mesmo IndexedDB;
-- mesmo formato de cofre;
-- mesmas credenciais YubiKey/WebAuthn quando a URL/origem permanece igual;
-- mesmas senhas e configuracoes locais.
-
-NOVO MECANISMO
-- Service Worker usa updateViaCache=none;
-- verificacao explicita de atualizacao ao abrir/voltar ao app;
-- version.json para detectar futuras versoes;
-- recursos da interface recebem versao na URL para evitar cache antigo;
-- esta versao de reparo ativa o novo Service Worker imediatamente quando detectado.
-
-
-CORRECAO v0.2.2
-- Barra inferior agora fica fora da area rolavel.
-- A tela Segurança rola apenas o conteudo; a navegacao permanece fixa.
-- Respeita a safe-area inferior do iPhone.
-- Ao trocar de aba, o conteudo volta ao topo.
+IMPORTANTE
+- Esta release grava KDBX 4.1 AES-256-CBC + AES-KDF.
+- Argon2d/Argon2id de KDBX externos sao recusados nesta versao.
+- A .key de recuperacao tem 32 bytes. Guarde fora do iPhone.
+- Para modo Senha + YubiKey, a recuperacao exige senha + .key.
+- Use conta GitHub bem protegida; comprometer a origem web compromete um PWA.
+- Nao houve auditoria externa independente.

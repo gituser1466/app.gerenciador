@@ -9,234 +9,107 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Meu Cofre">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; worker-src 'self'; manifest-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'self'; manifest-src 'self'; media-src 'none'">
   <title>Meu Cofre</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=0.2.2">
-  <link rel="icon" href="./icon-192.png?v=0.2.2" sizes="192x192">
-  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=0.2.2">
-  <link rel="stylesheet" href="./styles.css?v=0.2.2">
+  <link rel="manifest" href="./manifest.webmanifest?v=1.0.0">
+  <link rel="icon" href="./icon-192.png?v=1.0.0" sizes="192x192">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=1.0.0">
+  <link rel="stylesheet" href="./styles.css?v=1.0.0">
 </head>
 <body>
   <main class="shell">
     <div class="brand" id="public-brand">
       <div class="brand-mark">⌁</div>
-      <div><h1>Meu Cofre</h1><p>cofre local, offline e sem servidor de senhas</p><small id="public-version" class="hint">v0.2.2</small></div>
+      <div><h1>Meu Cofre</h1><p>KDBX 4.1 local, offline e sem servidor de senhas</p><small id="public-version" class="hint">v1.0.0</small></div>
     </div>
 
     <section id="screen-setup" hidden>
       <div class="card stack">
-        <div>
-          <h2 class="screen-title">Criar seu cofre</h2>
-          <p class="screen-subtitle">A senha mestra é o método de recuperação. Ela nunca é armazenada.</p>
-        </div>
+        <div><h2 class="screen-title">Criar cofre KDBX</h2><p class="screen-subtitle">Escolha como o banco será protegido. O arquivo KDBX é o backup canônico.</p></div>
         <label>Nome do cofre<input id="setup-name" value="Meu Cofre" autocomplete="off" maxlength="80"></label>
-        <label>Senha mestra<input id="setup-password" type="password" autocomplete="new-password" minlength="8"></label>
-        <label>Repetir senha mestra<input id="setup-password2" type="password" autocomplete="new-password" minlength="8"></label>
-        <div id="setup-strength" class="hint">Use de preferência uma frase longa e exclusiva.</div>
-        <button class="btn" id="setup-create">Criar cofre criptografado</button>
-        <button class="btn secondary" id="setup-import">Importar backup .mcvault</button>
-        <input type="file" id="setup-import-file" accept=".mcvault,application/json" hidden>
-        <p class="security-note">Versão 0.2.2 para testes avançados. Antes de guardar credenciais críticas, mantenha backup e valide o funcionamento no seu iPhone.</p>
+        <label>Proteção
+          <select id="setup-mode">
+            <option value="password">Senha mestra</option>
+            <option value="yubikey">YubiKey como única forma normal de acesso</option>
+            <option value="password-yubikey">Senha + YubiKey (dois fatores)</option>
+          </select>
+        </label>
+        <div id="setup-password-fields" class="stack">
+          <label>Senha mestra<input id="setup-password" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false"></label>
+          <label>Repetir senha mestra<input id="setup-password2" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false"></label>
+          <div class="hint">Prefira uma frase longa, exclusiva e memorizável. O KDBX preserva exatamente os caracteres digitados.</div>
+        </div>
+        <div id="setup-yubikey-note" class="security-note" hidden>O iPhone pedirá a YubiKey durante a criação. Depois, exporte imediatamente a chave de recuperação de 32 bytes e mantenha-a separada.</div>
+        <button class="btn" id="setup-create">Criar KDBX 4.1</button>
+        <button class="btn secondary" id="setup-import-kdbx">Importar .kdbx existente</button>
+        <input type="file" id="setup-import-kdbx-file" accept=".kdbx,application/octet-stream" hidden>
+        <button class="btn ghost" id="setup-import-legacy">Restaurar backup antigo .mcvault</button>
+        <input type="file" id="setup-import-legacy-file" accept=".mcvault,application/json" hidden>
+        <p class="security-note">Esta versão foi revisada e testada internamente, mas não passou por auditoria criptográfica externa. Faça backup e valide seu fluxo de recuperação antes de depender dela como único cofre.</p>
       </div>
     </section>
 
     <section id="screen-unlock" hidden>
       <div class="card stack">
-        <div>
-          <h2 class="screen-title">Desbloquear</h2>
-          <p class="screen-subtitle">O cofre é descriptografado apenas na memória deste aparelho.</p>
-        </div>
+        <div><h2 class="screen-title">Desbloquear</h2><p class="screen-subtitle" id="unlock-subtitle">O KDBX é autenticado antes de ser descriptografado.</p></div>
         <div id="unlock-policy-note" class="security-note"></div>
-
-        <div id="unlock-any-area" class="stack">
-          <div id="unlock-password-area" class="stack">
-            <label>Senha mestra<input id="unlock-password" type="password" autocomplete="current-password"></label>
-            <button class="btn" id="unlock-password-btn">Desbloquear com senha</button>
-          </div>
-          <div id="unlock-prf-buttons" class="stack"></div>
+        <div id="unlock-password-area" class="stack" hidden>
+          <label>Senha mestra<input id="unlock-password" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false"></label>
+          <button class="btn" id="unlock-password-btn">Desbloquear com senha</button>
         </div>
-
+        <div id="unlock-prf-buttons" class="stack"></div>
         <div id="unlock-twofactor-area" class="stack" hidden>
-          <label>Senha mestra<input id="unlock-2fa-password" type="password" autocomplete="current-password"></label>
+          <label>Senha mestra<input id="unlock-2fa-password" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false"></label>
           <div id="unlock-twofactor-buttons" class="stack"></div>
-          <p class="hint">Neste modo, a chave que abre o cofre é protegida criptograficamente pela combinação da senha mestra com a YubiKey.</p>
         </div>
-
-        <details id="unlock-recovery" class="recovery-details">
-          <summary>Recuperação e métodos alternativos</summary>
+        <details id="unlock-recovery" class="recovery-details" hidden>
+          <summary>Recuperação com arquivo de chave</summary>
           <div class="stack recovery-body">
-            <label>Senha mestra de recuperação<input id="unlock-recovery-password" type="password" autocomplete="current-password"></label>
-            <button class="btn secondary" id="unlock-recovery-password-btn">Usar senha de recuperação</button>
-            <div id="unlock-alternative-buttons" class="stack"></div>
-            <p class="hint">A senha mestra é mantida como recuperação para evitar perda definitiva do cofre se a YubiKey for perdida ou o domínio mudar.</p>
+            <label id="recovery-password-label" hidden>Senha mestra<input id="unlock-recovery-password" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false"></label>
+            <button class="btn secondary" id="choose-recovery-key">Escolher chave de recuperação (.key)</button>
+            <input type="file" id="unlock-recovery-key-file" accept=".key,application/octet-stream" hidden>
+            <p class="hint">Em “Senha + YubiKey”, a recuperação exige a senha mestra e a chave de 32 bytes. Em “YubiKey”, a chave de recuperação substitui a YubiKey.</p>
           </div>
         </details>
-
-        <button class="btn secondary" id="unlock-import">Restaurar backup .mcvault</button>
-        <input type="file" id="unlock-import-file" accept=".mcvault,application/json" hidden>
+        <button class="btn ghost" id="unlock-import-kdbx">Substituir por outro .kdbx</button>
+        <input type="file" id="unlock-import-kdbx-file" accept=".kdbx,application/octet-stream" hidden>
         <div id="unlock-error" class="error" role="alert"></div>
       </div>
     </section>
 
     <section id="screen-app" hidden>
       <div class="app-scroll" id="app-scroll">
-      <header class="topbar">
-        <div class="title"><h2 id="app-vault-name">Meu Cofre</h2><small id="app-count">0 itens</small></div>
-        <button class="btn ghost small" id="lock-btn">Bloquear</button>
-      </header>
-
-      <section class="view active" data-view="vault">
-        <input class="search" id="search" type="search" placeholder="Buscar por título, usuário, site ou tag" autocomplete="off">
-        <div id="entry-list" class="entry-list"></div>
-        <button class="fab" id="add-entry" aria-label="Adicionar item">+</button>
-      </section>
-
-      <section class="view" data-view="generator">
-        <div class="section">
-          <h3>Gerador de senha</h3>
-          <div class="card stack">
-            <div id="generated-password" class="generated" aria-live="polite"></div>
-            <div class="grid-2">
-              <label>Comprimento<input id="gen-length" type="number" min="8" max="128" value="24"></label>
-              <div class="checkbox-row">
-                <label><input id="gen-lower" type="checkbox" checked> a-z</label>
-                <label><input id="gen-upper" type="checkbox" checked> A-Z</label>
-                <label><input id="gen-digits" type="checkbox" checked> 0-9</label>
-                <label><input id="gen-symbols" type="checkbox" checked> símbolos</label>
-              </div>
-            </div>
-            <div class="actions"><button class="btn" id="generate-btn">Gerar</button><button class="btn secondary" id="copy-generated">Copiar</button></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="view" data-view="security">
-        <div class="section">
-          <h3>Desbloqueio</h3>
-          <div class="card" id="auth-slots"></div>
-        </div>
-        <div class="section">
-          <h3>Como abrir o cofre</h3>
-          <div class="card stack">
-            <label>Política de desbloqueio
-              <select id="unlock-policy-select">
-                <option value="any">Senha, YubiKey ou este iPhone</option>
-                <option value="yubikey">YubiKey principal; senha somente para recuperação</option>
-                <option value="password-yubikey">Senha + YubiKey (dois fatores)</option>
-              </select>
-            </label>
-            <button class="btn secondary" id="save-unlock-policy">Aplicar política</button>
-            <p class="hint">Mesmo nos modos com YubiKey, a senha mestra permanece como recuperação de emergência. Isso reduz o risco de perder o cofre definitivamente.</p>
-          </div>
-        </div>
-        <div class="section">
-          <h3>Adicionar método</h3>
-          <div class="card stack">
-            <button class="btn" id="add-yubikey">Adicionar YubiKey / chave FIDO2</button>
-            <button class="btn secondary" id="add-faceid">Adicionar este iPhone / chave de acesso</button>
-            <p class="hint">Você pode cadastrar mais de uma YubiKey. Depois de cadastrá-la, use “Criar 2 fatores” para exigir senha + essa YubiKey no desbloqueio normal.</p>
-          </div>
-        </div>
-        <div class="section">
-          <h3>Senha + YubiKey</h3>
-          <div class="card stack">
-            <label>YubiKey cadastrada<select id="twofactor-yubikey-select"></select></label>
-            <label>Senha mestra atual<input id="twofactor-master-password" type="password" autocomplete="current-password"></label>
-            <button class="btn secondary" id="create-twofactor">Criar método de dois fatores</button>
-            <p class="hint">O aplicativo verificará sua senha e pedirá um toque na YubiKey. A nova proteção usa os dois segredos para embrulhar a chave do cofre.</p>
-          </div>
-        </div>
-        <div class="section">
-          <h3>Alterar senha mestra</h3>
-          <div class="card stack">
-            <label>Nova senha<input id="new-master" type="password" autocomplete="new-password"></label>
-            <label>Repetir nova senha<input id="new-master2" type="password" autocomplete="new-password"></label>
-            <button class="btn secondary" id="change-master">Trocar senha mestra</button>
-            <p class="hint">Se houver um método “Senha + YubiKey”, remova-o antes de trocar a senha e cadastre-o novamente depois.</p>
-          </div>
-        </div>
-        <div class="section">
-          <h3>Diagnóstico</h3>
-          <div class="card" id="security-diagnostics"></div>
-        </div>
-        <div class="section">
-          <h3>Backup</h3>
-          <div class="card stack">
-            <button class="btn secondary" id="export-backup">Exportar backup criptografado</button>
-            <div id="backup-status" class="hint"></div>
-            <button class="btn ghost" id="restore-backup">Restaurar backup</button>
-            <input type="file" id="restore-backup-file" accept=".mcvault,application/json" hidden>
-            <p class="hint">O backup contém somente o cofre criptografado e os dados públicos necessários para desbloqueá-lo.</p>
-          </div>
-        </div>
-      </section>
-
-      <section class="view" data-view="settings">
-        <div class="section">
-          <h3>Bloqueio automático</h3>
-          <div class="card stack">
-            <label>Por inatividade (minutos)<input id="setting-idle" type="number" min="1" max="120"></label>
-            <label>Ao deixar o app em segundo plano (segundos)<input id="setting-background" type="number" min="0" max="300"></label>
-            <label>Limpar área de transferência após (segundos)<input id="setting-clipboard" type="number" min="0" max="300"></label>
-            <button class="btn secondary" id="save-settings">Salvar configurações</button>
-          </div>
-        </div>
-        <div class="section">
-          <h3>Sobre</h3>
-          <div class="card stack">
-            <div class="row"><div class="row-main"><div class="row-title">Versão</div><div class="row-sub">0.2.2 — correção da barra inferior no iPhone</div></div></div>
-            <div class="security-note">O cofre local usa AES-256-GCM. A senha mestra usa PBKDF2-SHA-256 e a YubiKey usa WebAuthn PRF/HKDF. O modo Senha + YubiKey combina os dois segredos antes de liberar a chave do cofre. Compatibilidade KDBX/Argon2id permanece planejada para uma etapa posterior com testes específicos.</div>
-          </div>
-        </div>
-      </section>
-
+        <header class="topbar"><div class="title"><h2 id="app-vault-name">Meu Cofre</h2><small id="app-count">0 itens</small></div><button class="btn ghost small" id="lock-btn">Bloquear</button></header>
+        <section class="view active" data-view="vault">
+          <input class="search" id="search" type="search" placeholder="Buscar por título, usuário, site ou tag" autocomplete="off" autocapitalize="none">
+          <div id="entry-list" class="entry-list"></div><button class="fab" id="add-entry" aria-label="Adicionar item">+</button>
+        </section>
+        <section class="view" data-view="generator">
+          <div class="section"><h3>Gerador de senha</h3><div class="card stack"><div id="generated-password" class="generated" aria-live="polite"></div><div class="grid-2"><label>Comprimento<input id="gen-length" type="number" min="8" max="128" value="24"></label><div class="checkbox-row"><label><input id="gen-lower" type="checkbox" checked> a-z</label><label><input id="gen-upper" type="checkbox" checked> A-Z</label><label><input id="gen-digits" type="checkbox" checked> 0-9</label><label><input id="gen-symbols" type="checkbox" checked> símbolos</label></div></div><div class="actions"><button class="btn" id="generate-btn">Gerar</button><button class="btn secondary" id="copy-generated">Copiar</button></div></div></div>
+        </section>
+        <section class="view" data-view="security">
+          <div class="section" id="legacy-migration-section" hidden><h3>Migração obrigatória</h3><div class="card stack"><div class="security-note">Seu cofre ainda está no formato antigo .mcvault. Faça a migração para KDBX 4.1 antes de considerar esta versão concluída.</div><label>Nova proteção KDBX<select id="migration-mode"><option value="password">Senha mestra</option><option value="yubikey">YubiKey</option><option value="password-yubikey">Senha + YubiKey</option></select></label><div id="migration-password-fields" class="stack"><label>Senha mestra KDBX<input id="migration-password" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false"></label><label>Repetir senha<input id="migration-password2" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false"></label></div><label id="migration-key-label" hidden>YubiKey existente<select id="migration-yubikey"></select></label><button class="btn" id="migrate-kdbx">Fazer backup antigo e migrar para KDBX</button></div></div>
+          <div class="section"><h3>Proteção KDBX</h3><div class="card" id="kdbx-summary"></div></div>
+          <div class="section"><h3>YubiKeys e chaves de acesso</h3><div class="card" id="auth-slots"></div><div class="card stack card-gap"><button class="btn" id="add-yubikey">Adicionar YubiKey / chave FIDO2</button><button class="btn secondary" id="add-passkey">Adicionar este iPhone / chave de acesso</button><p class="hint">Cadastre uma segunda YubiKey como reserva. O PRF da credencial só libera o componente criptográfico associado ao KDBX.</p></div></div>
+          <div class="section" id="recovery-key-section" hidden><h3>Chave de recuperação</h3><div class="card stack"><button class="btn secondary" id="export-recovery-key">Exportar chave de recuperação de 32 bytes</button><div id="recovery-key-status" class="security-note">Guarde esta chave fora do iPhone. Ela não contém suas senhas, mas pode substituir a YubiKey conforme o modo escolhido.</div></div></div>
+          <div class="section" id="change-password-section" hidden><h3>Alterar senha mestra</h3><div class="card stack"><label>Nova senha<input id="new-master" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false"></label><label>Repetir nova senha<input id="new-master2" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false"></label><button class="btn secondary" id="change-master">Trocar senha e recriptografar KDBX</button></div></div>
+          <div class="section"><h3>Backup e interoperabilidade</h3><div class="card stack"><button class="btn secondary" id="export-kdbx">Exportar MeuCofre.kdbx</button><button class="btn ghost" id="restore-kdbx">Restaurar/substituir KDBX</button><input type="file" id="restore-kdbx-file" accept=".kdbx,application/octet-stream" hidden><div id="backup-status" class="hint"></div><p class="hint">O .kdbx é o backup canônico e pode ser aberto por aplicativos KeePass compatíveis quando você possuir os componentes corretos da chave mestra.</p></div></div>
+          <div class="section"><h3>Diagnóstico de segurança</h3><div class="card" id="security-diagnostics"></div></div>
+        </section>
+        <section class="view" data-view="settings">
+          <div class="section"><h3>Bloqueio automático</h3><div class="card stack"><label>Por inatividade (minutos)<input id="setting-idle" type="number" min="1" max="120"></label><label>Ao deixar o app em segundo plano (segundos)<input id="setting-background" type="number" min="0" max="300"></label><label>Limpar área de transferência após (segundos)<input id="setting-clipboard" type="number" min="0" max="300"></label><button class="btn secondary" id="save-settings">Salvar configurações</button></div></div>
+          <div class="section"><h3>Armazenamento</h3><div class="card stack"><button class="btn secondary" id="request-persistent">Solicitar armazenamento persistente</button><div id="persistent-status" class="hint"></div></div></div>
+          <div class="section"><h3>Sobre</h3><div class="card stack"><div class="row"><div class="row-main"><div class="row-title">Meu Cofre</div><div class="row-sub">1.0.0 · KDBX 4.1 · versão estável</div></div></div><div class="security-note">Sem telemetria, sem CDN e sem servidor de senhas. A hospedagem entrega apenas o código. Um comprometimento da origem web ainda é um risco estrutural de qualquer PWA; proteja sua conta GitHub e o repositório com autenticação forte.</div></div></div>
+        </section>
       </div>
-
-      <nav class="bottom-nav" aria-label="Navegação">
-        <button class="nav-btn active" data-nav="vault"><span>⌂</span>Cofre</button>
-        <button class="nav-btn" data-nav="generator"><span>✦</span>Gerador</button>
-        <button class="nav-btn" data-nav="security"><span>⌾</span>Segurança</button>
-        <button class="nav-btn" data-nav="settings"><span>⚙</span>Ajustes</button>
-      </nav>
+      <nav class="bottom-nav" aria-label="Navegação"><button class="nav-btn active" data-nav="vault"><span>⌂</span>Cofre</button><button class="nav-btn" data-nav="generator"><span>✦</span>Gerador</button><button class="nav-btn" data-nav="security"><span>⌾</span>Segurança</button><button class="nav-btn" data-nav="settings"><span>⚙</span>Ajustes</button></nav>
     </section>
   </main>
 
-  <div id="entry-modal" class="modal-backdrop" hidden>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="entry-modal-title">
-      <div class="modal-head"><h3 id="entry-modal-title">Novo item</h3><button class="icon-btn" id="entry-close" aria-label="Fechar">×</button></div>
-      <form id="entry-form" class="stack">
-        <input id="entry-id" type="hidden">
-        <label>Título<input id="entry-title" required maxlength="160" autocomplete="off"></label>
-        <label>Usuário / e-mail<input id="entry-username" maxlength="320" autocomplete="off" autocapitalize="none"></label>
-        <label>Senha
-          <div class="password-wrap"><input id="entry-password" type="password" autocomplete="off"><button type="button" class="btn secondary small" id="entry-show-password">Mostrar</button><button type="button" class="btn secondary small" id="entry-generate-password">Gerar</button></div>
-        </label>
-        <label>Site / URL<input id="entry-url" inputmode="url" autocomplete="off" autocapitalize="none"></label>
-        <label>Tags<input id="entry-tags" placeholder="trabalho, banco, pessoal" autocomplete="off"></label>
-        <label>Segredo TOTP (Base32)<input id="entry-totp" autocomplete="off" autocapitalize="characters"></label>
-        <div id="entry-totp-box" class="totp-box" hidden><div><div class="hint">Código atual</div><div id="entry-totp-code" class="totp-code">------</div></div><div id="entry-totp-remaining" class="pill"></div><button type="button" class="btn secondary small" id="entry-copy-totp">Copiar</button></div>
-        <label>Notas<textarea id="entry-notes" autocomplete="off"></textarea></label>
-        <label style="display:flex;grid-template-columns:auto 1fr;align-items:center"><input id="entry-favorite" type="checkbox" style="width:auto"> Favorito</label>
-        <div class="actions">
-          <button type="submit" class="btn">Salvar</button>
-          <button type="button" class="btn danger" id="entry-delete" hidden>Excluir</button>
-        </div>
-        <div class="actions" id="entry-quick-actions" hidden>
-          <button type="button" class="btn secondary" id="entry-copy-user">Copiar usuário</button>
-          <button type="button" class="btn secondary" id="entry-copy-pass">Copiar senha</button>
-          <button type="button" class="btn secondary" id="entry-open-url">Abrir site</button>
-        </div>
-      </form>
-    </div>
-  </div>
+  <div id="entry-modal" class="modal-backdrop" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="entry-modal-title"><div class="modal-head"><h3 id="entry-modal-title">Novo item</h3><button class="icon-btn" id="entry-close" aria-label="Fechar">×</button></div><form id="entry-form" class="stack"><input id="entry-id" type="hidden"><label>Título<input id="entry-title" required maxlength="160" autocomplete="off"></label><label>Usuário / e-mail<input id="entry-username" maxlength="320" autocomplete="off" autocapitalize="none" spellcheck="false"></label><label>Senha<div class="password-wrap"><input id="entry-password" type="password" autocomplete="off" autocapitalize="none" spellcheck="false"><button type="button" class="btn secondary small" id="entry-show-password">Mostrar</button><button type="button" class="btn secondary small" id="entry-generate-password">Gerar</button></div></label><label>Site / URL<input id="entry-url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"></label><label>Tags<input id="entry-tags" placeholder="trabalho, banco, pessoal" autocomplete="off"></label><label>Segredo TOTP (Base32)<input id="entry-totp" autocomplete="off" autocapitalize="characters" spellcheck="false"></label><div id="entry-totp-box" class="totp-box" hidden><div><div class="hint">Código atual</div><div id="entry-totp-code" class="totp-code">------</div></div><div id="entry-totp-remaining" class="pill"></div><button type="button" class="btn secondary small" id="entry-copy-totp">Copiar</button></div><label>Notas<textarea id="entry-notes" autocomplete="off" spellcheck="false"></textarea></label><label class="checkbox-label"><input id="entry-favorite" type="checkbox"> Favorito</label><div class="actions"><button type="submit" class="btn">Salvar</button><button type="button" class="btn danger" id="entry-delete" hidden>Excluir</button></div><div class="actions" id="entry-quick-actions" hidden><button type="button" class="btn secondary" id="entry-copy-user">Copiar usuário</button><button type="button" class="btn secondary" id="entry-copy-pass">Copiar senha</button><button type="button" class="btn secondary" id="entry-open-url">Abrir site</button></div></form></div></div>
 
   <div id="toast" class="toast" hidden></div>
-  <div id="update-banner" class="update-banner" hidden>
-    <strong>Atualização disponível</strong>
-    <div class="hint">A nova versão só será ativada quando você confirmar.</div>
-    <div class="actions"><button class="btn small" id="apply-update">Atualizar agora</button><button class="btn ghost small" id="dismiss-update">Depois</button></div>
-  </div>
-
-  <script type="module" src="./app.js?v=0.2.2"></script>
+  <div id="update-banner" class="update-banner" hidden><strong>Atualização disponível</strong><div class="hint">A nova versão só será ativada quando você confirmar.</div><div class="actions"><button class="btn small" id="apply-update">Atualizar agora</button><button class="btn ghost small" id="dismiss-update">Depois</button></div></div>
+  <script type="module" src="./app.js?v=1.0.0"></script>
 </body>
 </html>

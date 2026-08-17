@@ -85,7 +85,8 @@ export async function evaluatePrf(slotLike) {
   const credentialId = base64UrlToBytes(slotLike.credentialId);
   const prfSalt = base64ToBytes(slotLike.prfSalt);
   const descriptor = { type: 'public-key', id: credentialId };
-  if (Array.isArray(slotLike.transports) && slotLike.transports.length) descriptor.transports = slotLike.transports;
+  // Não envia hints de transporte no get(): o credentialId já restringe a credencial e
+  // omitir transports evita incompatibilidades específicas de Safari/NFC.
 
   let assertion;
   try {
