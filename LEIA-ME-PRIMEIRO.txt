@@ -1,34 +1,32 @@
-MEU COFRE PWA v0.2.0
-====================
+MEU COFRE PWA v0.2.1 - CORRECAO DE ATUALIZACAO NO IPHONE
+================================================================
 
-ATUALIZACAO SEGURA A PARTIR DA v0.1.x
+POR QUE ESTA VERSAO EXISTE
+A v0.1/v0.2 usava cache-first para a pagina principal. Em alguns iPhones, o
+Service Worker continuava exibindo a versao antiga mesmo depois do GitHub Pages
+publicar os arquivos novos. A v0.2.1 corrige especificamente esse fluxo.
 
-1. ANTES DE ATUALIZAR, abra o Meu Cofre no iPhone e exporte um backup .mcvault.
-2. Extraia este ZIP no computador.
-3. No mesmo repositorio GitHub que ja publica o Meu Cofre, use Add file > Upload files.
-4. Envie TODOS os arquivos desta pasta para a raiz do repositorio e confirme o commit.
-5. Nao mude o nome do repositorio, usuario GitHub, dominio ou URL do Pages durante esta atualizacao.
-6. Aguarde o GitHub Pages publicar a alteracao.
-7. Abra o Meu Cofre pelo icone no iPhone. Quando aparecer "Atualizacao disponivel", toque em "Atualizar agora".
-8. Confirme que aparece Versao 0.2.0 em Ajustes > Sobre.
-9. Teste a YubiKey com credenciais de teste antes de depender do novo modo de dois fatores.
+COMO ATUALIZAR SEM PERDER O COFRE
+1. Abra a versao antiga no iPhone e exporte um backup .mcvault antes de qualquer alteracao.
+2. No MESMO repositorio e na MESMA URL do GitHub Pages, envie TODOS os arquivos deste ZIP para a raiz e confirme o commit.
+3. Aguarde o GitHub Pages concluir o deploy.
+4. Com internet ativa, abra o icone Meu Cofre, deixe aberto por cerca de 10 segundos, feche completamente e abra novamente.
+5. A tela inicial deve mostrar "v0.2.1" abaixo de Meu Cofre. Em Ajustes > Sobre deve aparecer 0.2.1.
+6. NAO mude usuario GitHub, nome do repositorio, dominio ou URL. WebAuthn/YubiKey e vinculado a origem HTTPS.
 
-O cofre ja existente permanece no IndexedDB do mesmo dominio. Os arquivos do site nao contem suas senhas.
+SE CONTINUAR NA VERSAO ANTIGA
+Nao apague o app nem os dados do Safari antes de ter um backup .mcvault confirmado.
+Com o backup salvo, pode-se fazer uma limpeza controlada do site e reinstalar a PWA.
 
-NOVIDADES DA v0.2.0
-- YubiKey principal com senha mestra escondida na area de recuperacao.
-- Modo Senha + YubiKey com combinacao criptografica dos dois fatores.
-- Cadastro de mais de uma YubiKey, para permitir chave reserva.
-- Terminologia correta para o iPhone: "Este iPhone / chave de acesso".
-- Politica de desbloqueio configuravel.
-- Registro da data do ultimo backup exportado.
-- Compatibilidade com cofres criados pela v0.1.x.
+O QUE NAO MUDA
+- mesmo IndexedDB;
+- mesmo formato de cofre;
+- mesmas credenciais YubiKey/WebAuthn quando a URL/origem permanece igual;
+- mesmas senhas e configuracoes locais.
 
-IMPORTANTE SOBRE RECUPERACAO
-Mesmo no modo "YubiKey principal" ou "Senha + YubiKey", a senha mestra continua existindo como recuperacao de emergencia. Isso e proposital para evitar perda definitiva do cofre se uma chave for perdida ou se a origem HTTPS mudar.
-
-NAO MUDE O DOMINIO/URL SEM ANTES EXPORTAR BACKUP
-Credenciais WebAuthn sao vinculadas a origem/RP do site. Uma mudanca de dominio pode impedir o uso dos metodos WebAuthn antigos. A senha mestra e o backup .mcvault sao a recuperacao portatil.
-
-KDBX
-Esta versao ainda usa o formato .mcvault do prototipo. KDBX/Argon2id nao foi implementado nesta etapa.
+NOVO MECANISMO
+- Service Worker usa updateViaCache=none;
+- verificacao explicita de atualizacao ao abrir/voltar ao app;
+- version.json para detectar futuras versoes;
+- recursos da interface recebem versao na URL para evitar cache antigo;
+- esta versao de reparo ativa o novo Service Worker imediatamente quando detectado.

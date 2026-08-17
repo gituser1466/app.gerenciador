@@ -26,6 +26,7 @@ import {
   wipe
 } from './utils.js';
 
+const APP_VERSION = '0.2.1';
 const $ = (id) => document.getElementById(id);
 let record = null;
 let session = null;
@@ -869,8 +870,17 @@ async function saveSettings() {
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   try {
-    const registration = await navigator.serviceWorker.register('./sw.js', { scope: './' });
-    if (registration.waiting && navigator.serviceWorker.controller) showUpdate(registration.waiting);
+    // updateViaCache:none is important on iOS/GitHub Pages: never reuse an HTTP-cached SW script.
+    const registration = await navigator.serviceWorker.register(`./sw.js?v=${APP_VERSION}`, {
+      scope: './',
+      updateViaCache: 'none'
+    });
+
+    const inspectRegistration = () => {
+      if (registration.waiting && navigator.serviceWorker.controller) showUpdate(registration.waiting);
+    };
+    inspectRegistration();
+
     registration.addEventListener('updatefound', () => {
       const worker = registration.installing;
       if (!worker) return;
@@ -878,7 +888,31 @@ async function registerServiceWorker() {
         if (worker.state === 'installed' && navigator.serviceWorker.controller) showUpdate(worker);
       });
     });
+
     navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
+
+    // Explicitly ask for a network update on launch. This avoids the long iOS SW refresh delay.
+    registration.update().catch(() => {});
+    setTimeout(() => registration.update().catch(() => {}), 1800);
+
+    // Future releases publish version.json. Unique query prevents the current SW cache from hiding it.
+    const checkRemoteVersion = async () => {
+      try {
+        const response = await fetch(`./version.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const info = await response.json();
+        if (info?.version && info.version !== APP_VERSION) {
+          await registration.update().catch(() => {});
+          inspectRegistration();
+        }
+      } catch (_) {
+        // Offline is a supported state; no warning is necessary.
+      }
+    };
+    checkRemoteVersion();
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) checkRemoteVersion();
+    });
   } catch (error) {
     console.warn('Service Worker indisponível:', error);
   }
