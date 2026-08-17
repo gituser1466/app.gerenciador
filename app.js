@@ -26,7 +26,7 @@ import {
   wipe
 } from './utils.js';
 
-const APP_VERSION = '0.2.1';
+const APP_VERSION = '0.2.2';
 const $ = (id) => document.getElementById(id);
 let record = null;
 let session = null;
@@ -367,6 +367,10 @@ function navigate(view) {
   document.querySelectorAll('[data-nav]').forEach((el) => el.classList.toggle('active', el.dataset.nav === view));
   if (view === 'security') renderSecurity();
   if (view === 'settings') renderSettings();
+  // Only the content panel scrolls. Keep the bottom navigation anchored to the viewport
+  // and start each section at the top, including the long Security screen on iOS.
+  const scroller = $('app-scroll');
+  if (scroller) scroller.scrollTop = 0;
 }
 
 function entryMatches(entry, term) {

@@ -11,16 +11,16 @@
   <meta name="apple-mobile-web-app-title" content="Meu Cofre">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; worker-src 'self'; manifest-src 'self'">
   <title>Meu Cofre</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=0.2.1">
-  <link rel="icon" href="./icon-192.png?v=0.2.1" sizes="192x192">
-  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=0.2.1">
-  <link rel="stylesheet" href="./styles.css?v=0.2.1">
+  <link rel="manifest" href="./manifest.webmanifest?v=0.2.2">
+  <link rel="icon" href="./icon-192.png?v=0.2.2" sizes="192x192">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=0.2.2">
+  <link rel="stylesheet" href="./styles.css?v=0.2.2">
 </head>
 <body>
   <main class="shell">
     <div class="brand" id="public-brand">
       <div class="brand-mark">⌁</div>
-      <div><h1>Meu Cofre</h1><p>cofre local, offline e sem servidor de senhas</p><small id="public-version" class="hint">v0.2.1</small></div>
+      <div><h1>Meu Cofre</h1><p>cofre local, offline e sem servidor de senhas</p><small id="public-version" class="hint">v0.2.2</small></div>
     </div>
 
     <section id="screen-setup" hidden>
@@ -36,7 +36,7 @@
         <button class="btn" id="setup-create">Criar cofre criptografado</button>
         <button class="btn secondary" id="setup-import">Importar backup .mcvault</button>
         <input type="file" id="setup-import-file" accept=".mcvault,application/json" hidden>
-        <p class="security-note">Versão 0.2.1 para testes avançados. Antes de guardar credenciais críticas, mantenha backup e valide o funcionamento no seu iPhone.</p>
+        <p class="security-note">Versão 0.2.2 para testes avançados. Antes de guardar credenciais críticas, mantenha backup e valide o funcionamento no seu iPhone.</p>
       </div>
     </section>
 
@@ -79,6 +79,7 @@
     </section>
 
     <section id="screen-app" hidden>
+      <div class="app-scroll" id="app-scroll">
       <header class="topbar">
         <div class="title"><h2 id="app-vault-name">Meu Cofre</h2><small id="app-count">0 itens</small></div>
         <button class="btn ghost small" id="lock-btn">Bloquear</button>
@@ -183,11 +184,13 @@
         <div class="section">
           <h3>Sobre</h3>
           <div class="card stack">
-            <div class="row"><div class="row-main"><div class="row-title">Versão</div><div class="row-sub">0.2.1 — correção de atualização no iPhone</div></div></div>
+            <div class="row"><div class="row-main"><div class="row-title">Versão</div><div class="row-sub">0.2.2 — correção da barra inferior no iPhone</div></div></div>
             <div class="security-note">O cofre local usa AES-256-GCM. A senha mestra usa PBKDF2-SHA-256 e a YubiKey usa WebAuthn PRF/HKDF. O modo Senha + YubiKey combina os dois segredos antes de liberar a chave do cofre. Compatibilidade KDBX/Argon2id permanece planejada para uma etapa posterior com testes específicos.</div>
           </div>
         </div>
       </section>
+
+      </div>
 
       <nav class="bottom-nav" aria-label="Navegação">
         <button class="nav-btn active" data-nav="vault"><span>⌂</span>Cofre</button>
@@ -234,6 +237,6 @@
     <div class="actions"><button class="btn small" id="apply-update">Atualizar agora</button><button class="btn ghost small" id="dismiss-update">Depois</button></div>
   </div>
 
-  <script type="module" src="./app.js?v=0.2.1"></script>
+  <script type="module" src="./app.js?v=0.2.2"></script>
 </body>
 </html>

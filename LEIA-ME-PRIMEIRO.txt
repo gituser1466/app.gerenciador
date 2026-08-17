@@ -1,17 +1,17 @@
-MEU COFRE PWA v0.2.1 - CORRECAO DE ATUALIZACAO NO IPHONE
+MEU COFRE PWA v0.2.2 - CORRECAO DE ATUALIZACAO NO IPHONE
 ================================================================
 
 POR QUE ESTA VERSAO EXISTE
 A v0.1/v0.2 usava cache-first para a pagina principal. Em alguns iPhones, o
 Service Worker continuava exibindo a versao antiga mesmo depois do GitHub Pages
-publicar os arquivos novos. A v0.2.1 corrige especificamente esse fluxo.
+publicar os arquivos novos. A v0.2.2 corrige especificamente esse fluxo.
 
 COMO ATUALIZAR SEM PERDER O COFRE
 1. Abra a versao antiga no iPhone e exporte um backup .mcvault antes de qualquer alteracao.
 2. No MESMO repositorio e na MESMA URL do GitHub Pages, envie TODOS os arquivos deste ZIP para a raiz e confirme o commit.
 3. Aguarde o GitHub Pages concluir o deploy.
 4. Com internet ativa, abra o icone Meu Cofre, deixe aberto por cerca de 10 segundos, feche completamente e abra novamente.
-5. A tela inicial deve mostrar "v0.2.1" abaixo de Meu Cofre. Em Ajustes > Sobre deve aparecer 0.2.1.
+5. A tela inicial deve mostrar "v0.2.2" abaixo de Meu Cofre. Em Ajustes > Sobre deve aparecer 0.2.2.
 6. NAO mude usuario GitHub, nome do repositorio, dominio ou URL. WebAuthn/YubiKey e vinculado a origem HTTPS.
 
 SE CONTINUAR NA VERSAO ANTIGA
@@ -30,3 +30,10 @@ NOVO MECANISMO
 - version.json para detectar futuras versoes;
 - recursos da interface recebem versao na URL para evitar cache antigo;
 - esta versao de reparo ativa o novo Service Worker imediatamente quando detectado.
+
+
+CORRECAO v0.2.2
+- Barra inferior agora fica fora da area rolavel.
+- A tela Segurança rola apenas o conteudo; a navegacao permanece fixa.
+- Respeita a safe-area inferior do iPhone.
+- Ao trocar de aba, o conteudo volta ao topo.

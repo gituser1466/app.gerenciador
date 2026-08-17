@@ -1,4 +1,4 @@
-const APP_VERSION = '0.2.1';
+const APP_VERSION = '0.2.2';
 const CACHE = `meucofre-shell-v${APP_VERSION}`;
 const ASSETS = [
   `./index.html?v=${APP_VERSION}`,
