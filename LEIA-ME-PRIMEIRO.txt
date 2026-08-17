@@ -1,0 +1,16 @@
+MEU COFRE - VERSAO PARA GITHUB PAGES SEM PASTAS
+
+Esta versao foi preparada para quem nao consegue enviar pastas pelo site do GitHub.
+
+IMPORTANTE:
+1. Extraia este ZIP no computador.
+2. Abra o repositorio no GitHub.
+3. Clique em Add file > Upload files.
+4. Selecione TODOS os arquivos extraidos de uma vez (Ctrl+A).
+5. Arraste-os para a pagina ou clique em choose your files.
+6. Clique em Commit changes.
+7. Em Settings > Pages, selecione Deploy from a branch > main > /(root) > Save.
+
+O arquivo index.html deve aparecer na raiz do repositorio.
+Nao envie o ZIP; envie os arquivos extraidos.
+Nao ha nenhuma pasta nesta versao.
