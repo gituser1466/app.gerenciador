@@ -31,9 +31,11 @@ import {
 import { evaluatePrf, platformAuthenticatorAvailable, registerPrfCredential } from './webauthn.js';
 import { generatePassword } from './generator.js';
 import { totp } from './totp.js';
+import { openVeraCryptFile } from './veracrypt.js';
+import { openSupportedFileSystem } from './filesystem.js';
 import { base64ToBytes, bytesToBase64, clampInt, downloadBlob, formatDateTime, safeHttpUrl, uuid, wipe } from './utils.js';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 const $ = (id) => document.getElementById(id);
 let record = null;
 let session = null;
@@ -44,6 +46,12 @@ let backgroundTimer = null;
 let toastTimer = null;
 let clipboardTimer = null;
 let waitingWorker = null;
+let vcSelectedFile = null;
+let vcKeyfiles = [];
+let vcVolume = null;
+let vcFs = null;
+let vcPath = [];
+let vcDirectoryRequest = 0;
 
 function isLegacyRecord(value) { return value?.format === LEGACY_FORMAT; }
 function isLegacySession() { return session?.kind === 'legacy'; }
@@ -114,6 +122,14 @@ function bindEvents() {
   document.querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click', () => navigate(b.dataset.nav)));
   ['gen-length','gen-lower','gen-upper','gen-digits','gen-symbols'].forEach(id => $(id).addEventListener('change', generateNewPassword));
   $('generate-btn').addEventListener('click', generateNewPassword); $('copy-generated').addEventListener('click', () => copyText($('generated-password').textContent, 'Senha gerada copiada.'));
+  $('vc-choose-file').addEventListener('click', () => $('vc-file').click());
+  $('vc-file').addEventListener('change', e => selectVcFile(e.target.files?.[0] || null));
+  $('vc-choose-keyfiles').addEventListener('click', () => $('vc-keyfiles').click());
+  $('vc-keyfiles').addEventListener('change', e => selectVcKeyfiles([...(e.target.files || [])]));
+  $('vc-open').addEventListener('click', openVcContainer);
+  $('vc-password').addEventListener('keydown', e => { if (e.key === 'Enter') openVcContainer(); });
+  $('vc-close').addEventListener('click', () => closeVeraCryptSession(true));
+  $('vc-back').addEventListener('click', vcGoBack);
   $('add-yubikey').addEventListener('click', () => addWebAuthnMethod('security-key'));
   $('add-passkey').addEventListener('click', () => addWebAuthnMethod('platform'));
   $('export-recovery-key').addEventListener('click', exportRecoveryKey);
@@ -237,7 +253,7 @@ async function unlockWithRecoveryFile(file){
 }
 
 function enterApp(){setPublicScreen('app');$('app-vault-name').textContent=session.vault.name||'Meu Cofre';$('search').value='';renderEntries();renderSecurity();renderSettings();navigate('vault');resetIdleTimer();}
-function clearSessionMemory(){if(session?.vaultKey)wipe(session.vaultKey);for(const c of session?.components||[])wipe(c);session=null;editingId=null;clearTimeout(idleTimer);clearTimeout(backgroundTimer);clearTimeout(clipboardTimer);stopTotpTimer();clearSecretInputs();}
+function clearSessionMemory(){closeVeraCryptSession(true);if(session?.vaultKey)wipe(session.vaultKey);for(const c of session?.components||[])wipe(c);session=null;editingId=null;clearTimeout(idleTimer);clearTimeout(backgroundTimer);clearTimeout(clipboardTimer);stopTotpTimer();clearSecretInputs();}
 function lockVault(message){clearSessionMemory();closeEntryModal();renderUnlockMethods();setPublicScreen('unlock');if(message)showToast(message);}
 function resetIdleTimer(){if(!session)return;clearTimeout(idleTimer);const m=clampInt(session.vault.settings?.idleLockMinutes,1,120,5);idleTimer=setTimeout(()=>lockVault('Bloqueado por inatividade.'),m*60000);}
 function handleVisibility(){if(!session)return;clearTimeout(backgroundTimer);if(document.hidden){const s=clampInt(session.vault.settings?.backgroundLockSeconds,0,300,0);if(s===0)lockVault('Bloqueado ao sair do aplicativo.');else backgroundTimer=setTimeout(()=>lockVault('Bloqueado em segundo plano.'),s*1000);}}
@@ -251,6 +267,143 @@ async function saveEntryFromForm(event){event.preventDefault();if(!session)retur
 async function deleteCurrentEntry(){if(!session||!editingId)return;const e=session.vault.entries.find(x=>x.id===editingId);if(!confirm(`Excluir “${e?.title||'este item'}”?`))return;session.vault.entries=session.vault.entries.filter(x=>x.id!==editingId);await persistVault();closeEntryModal();renderEntries();showToast('Item excluído.');}
 function toggleEntryPassword(){const i=$('entry-password');i.type=i.type==='password'?'text':'password';$('entry-show-password').textContent=i.type==='password'?'Mostrar':'Ocultar';}
 function openCurrentUrl(){const url=safeHttpUrl($('entry-url').value);if(!url)return showToast('URL inválida ou não permitida.','error');window.open(url.href,'_blank','noopener,noreferrer');}
+
+
+function formatVcBytes(value){
+  const n=Number(value)||0;
+  if(n<1024)return `${n} B`;
+  const units=['KB','MB','GB','TB'];let v=n/1024,i=0;
+  while(v>=1024&&i<units.length-1){v/=1024;i++;}
+  return `${v>=10?v.toFixed(1):v.toFixed(2)} ${units[i]}`;
+}
+function resetVcOpenedState(){
+  vcDirectoryRequest++;
+  try{vcFs?.close?.();}catch{}
+  try{vcVolume?.close?.();}catch{}
+  vcFs=null;vcVolume=null;vcPath=[];
+  if($('vc-open-area'))$('vc-open-area').hidden=true;
+  if($('vc-browser-section'))$('vc-browser-section').hidden=false;
+  $('vc-metadata')?.replaceChildren();$('vc-files')?.replaceChildren();
+  if($('vc-path'))$('vc-path').textContent='Raiz';
+  if($('vc-back'))$('vc-back').hidden=true;
+}
+function selectVcFile(file){
+  resetVcOpenedState();
+  vcSelectedFile=file;
+  if(!file){$('vc-file-info').textContent='Nenhum container selecionado.';return;}
+  $('vc-file-info').textContent=`${file.name} · ${formatVcBytes(file.size)}`;
+  $('vc-status').textContent='Container selecionado. Informe a senha e, se usados no volume, PIM/keyfiles.';
+}
+function selectVcKeyfiles(files){
+  vcKeyfiles=files.slice(0,32);
+  $('vc-keyfile-info').textContent=vcKeyfiles.length?`${vcKeyfiles.length} keyfile(s): ${vcKeyfiles.map(f=>f.name).join(', ')}`:'Sem keyfiles.';
+}
+function closeVeraCryptSession(resetSelection=false){
+  resetVcOpenedState();
+  if($('vc-password'))$('vc-password').value='';
+  if($('vc-status'))$('vc-status').textContent='';
+  vcKeyfiles=[];
+  if($('vc-keyfiles'))$('vc-keyfiles').value='';
+  if($('vc-keyfile-info'))$('vc-keyfile-info').textContent='Sem keyfiles.';
+  if(resetSelection){
+    vcSelectedFile=null;
+    if($('vc-file'))$('vc-file').value='';
+    if($('vc-file-info'))$('vc-file-info').textContent='Nenhum container selecionado.';
+  }
+}
+function addVcMeta(label,value){
+  const row=document.createElement('div');row.className='row';
+  const main=document.createElement('div');main.className='row-main';
+  const title=document.createElement('div');title.className='row-title';title.textContent=label;
+  const sub=document.createElement('div');sub.className='row-sub';sub.textContent=String(value);
+  main.append(title,sub);row.append(main);$('vc-metadata').append(row);
+}
+function renderVcMetadata(fileSystemError=null){
+  $('vc-metadata').replaceChildren();
+  const i=vcVolume?.info||{};
+  addVcMeta('Container',vcSelectedFile?.name||'—');
+  addVcMeta('Criptografia','AES-256-XTS');
+  addVcMeta('KDF',`${i.hash||'—'} · ${Number(i.iterations||0).toLocaleString('pt-BR')} iterações${i.pim?` · PIM ${i.pim}`:''}`);
+  addVcMeta('Cabeçalho',`${i.hidden?'oculto':'normal'} · versão ${i.headerVersion??'—'} · ${i.headerSource||'primário'}`);
+  addVcMeta('Volume',formatVcBytes(i.volumeSize||0));
+  addVcMeta('Área criptografada',`${formatVcBytes(i.encryptedAreaLength||0)} a partir de ${formatVcBytes(i.encryptedAreaStart||0)}`);
+  addVcMeta('Setor',`${i.sectorSize||512} bytes`);
+  addVcMeta('Sistema de arquivos',vcFs?.info?.type||(fileSystemError?`não suportado (${fileSystemError.message||fileSystemError})`:'não identificado'));
+}
+async function openVcContainer(){
+  if(!session)return showToast('Desbloqueie o Meu Cofre primeiro.','error');
+  if(!vcSelectedFile)return showToast('Selecione um container VeraCrypt.','error');
+  const btn=$('vc-open');const old=btn.textContent;btn.disabled=true;btn.textContent='Derivando chave...';
+  resetVcOpenedState();
+  let volume=null;
+  try{
+    $('vc-status').textContent='Lendo cabeçalho e derivando a chave localmente. Arquivos grandes não são enviados para nenhum servidor.';
+    volume=await openVeraCryptFile(vcSelectedFile,{password:$('vc-password').value,pim:$('vc-pim').value,keyfiles:vcKeyfiles,hash:$('vc-kdf').value,hidden:$('vc-volume-type').value==='hidden'});
+    vcVolume=volume;volume=null;
+    let fsError=null;
+    try{vcFs=await openSupportedFileSystem(vcVolume);}catch(e){fsError=e;vcFs=null;}
+    $('vc-open-area').hidden=false;
+    $('vc-browser-section').hidden=!vcFs;
+    renderVcMetadata(fsError);
+    $('vc-password').value='';
+    vcKeyfiles=[];$('vc-keyfiles').value='';$('vc-keyfile-info').textContent='Sem keyfiles (descartados após a abertura).';
+    if(vcFs){
+      vcPath=[{name:'Raiz',locator:null}];
+      await renderVcDirectory();
+      $('vc-status').textContent=`Volume aberto em modo somente leitura · ${vcFs.info.type}.`;
+    }else{
+      $('vc-status').textContent='Cabeçalho VeraCrypt aberto, mas o sistema de arquivos interno ainda não é suportado nesta versão.';
+    }
+  }catch(e){
+    try{volume?.close?.();}catch{}
+    resetVcOpenedState();
+    $('vc-status').textContent=e.message||String(e);
+    showToast(`Não foi possível abrir o container: ${e.message||e}`,'error');
+  }finally{btn.disabled=false;btn.textContent=old;}
+}
+async function renderVcDirectory(){
+  if(!vcFs||!vcPath.length)return;
+  const request=++vcDirectoryRequest;
+  const current=vcPath[vcPath.length-1];
+  $('vc-path').textContent=vcPath.map(x=>x.name).join(' / ');
+  $('vc-back').hidden=vcPath.length<=1;
+  $('vc-files').replaceChildren();
+  const wait=document.createElement('div');wait.className='hint';wait.textContent='Lendo diretório...';$('vc-files').append(wait);
+  try{
+    const entries=await vcFs.readDirectory(current.locator);
+    if(request!==vcDirectoryRequest)return;
+    $('vc-files').replaceChildren();
+    if(!entries.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='Pasta vazia.';$('vc-files').append(empty);return;}
+    entries.sort((a,b)=>Number(b.isDirectory)-Number(a.isDirectory)||a.name.localeCompare(b.name,'pt-BR')).forEach(entry=>{
+      const row=document.createElement('button');row.type='button';row.className='vc-file-row';
+      const icon=document.createElement('span');icon.className='vc-file-icon';icon.textContent=entry.isDirectory?'▣':'▤';
+      const main=document.createElement('span');
+      const name=document.createElement('span');name.className='vc-file-name';name.textContent=entry.name;
+      const meta=document.createElement('span');meta.className='vc-file-meta';meta.textContent=entry.isDirectory?'Pasta':`${formatVcBytes(entry.size)}${entry.modified?` · ${new Date(entry.modified).toLocaleString('pt-BR')}`:''}`;
+      main.append(name,meta);
+      const action=document.createElement('span');action.className='vc-file-action';action.textContent=entry.isDirectory?'Abrir':'Exportar';
+      row.append(icon,main,action);
+      row.addEventListener('click',()=>entry.isDirectory?vcEnterDirectory(entry):vcExportFile(entry));
+      $('vc-files').append(row);
+    });
+  }catch(e){if(request!==vcDirectoryRequest)return;$('vc-files').replaceChildren();const err=document.createElement('div');err.className='error';err.textContent=e.message||String(e);$('vc-files').append(err);}
+}
+function vcEnterDirectory(entry){if(!vcFs||!entry.isDirectory)return;vcPath.push({name:entry.name,locator:entry});renderVcDirectory();}
+function vcGoBack(){if(vcPath.length<=1)return;vcPath.pop();renderVcDirectory();}
+async function vcExportFile(entry){
+  if(!vcFs||entry.isDirectory)return;
+  const safe=(entry.name||'arquivo').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').slice(0,220)||'arquivo';
+  $('vc-status').textContent=`Descriptografando ${entry.name}...`;
+  let bytes=null;
+  try{
+    bytes=await vcFs.readFile(entry);
+    const blob=new Blob([bytes],{type:'application/octet-stream'});
+    downloadBlob(blob,safe);
+    $('vc-status').textContent=`${entry.name} exportado. A cópia baixada está em texto claro fora do container.`;
+    showToast('Arquivo exportado do container.','success');
+  }catch(e){showToast(e.message||String(e),'error');$('vc-status').textContent=e.message||String(e);}
+  finally{bytes&&wipe(bytes);}
+}
 
 async function persistVault(){if(!session)return;session.vault.updatedAt=new Date().toISOString();if(isLegacySession())record=await legacySaveRecord(record,session.vaultKey,session.vault);else record=await saveStoredKdbx(record,session.vault,session.components,session.publicMeta,session.kdbxInfo?.rounds);await putVaultRecord(record);}
 

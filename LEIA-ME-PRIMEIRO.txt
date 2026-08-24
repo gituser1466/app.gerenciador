@@ -1,19 +1,18 @@
-MEU COFRE 1.0.0 - KDBX 4.1
+MEU COFRE 1.1.0 - KDBX 4.1 + LEITOR VERACRYPT
 
-ARQUIVOS PARA GITHUB PAGES
-1. Faça backup .mcvault da v0.2.2 antes de atualizar.
-2. Envie TODOS os arquivos deste pacote para a RAIZ do MESMO repositorio.
-3. Nao mude o endereco GitHub Pages.
+ATUALIZAR NO GITHUB PAGES
+1. Faça backup do seu .kdbx antes da atualização.
+2. Envie TODOS os arquivos deste pacote para a RAIZ do MESMO repositório.
+3. Não mude o endereço GitHub Pages.
 4. Aguarde o deploy e abra o PWA com internet.
-5. Aceite o banner de atualizacao.
-6. Desbloqueie o cofre antigo e use Seguranca > Migracao obrigatoria.
-7. Guarde o .mcvault antigo, o novo .kdbx e a .key de recuperacao.
-8. Teste YubiKey e recuperacao antes de apagar qualquer backup.
+5. Aceite o banner de atualização.
 
-IMPORTANTE
-- Esta release grava KDBX 4.1 AES-256-CBC + AES-KDF.
-- Argon2d/Argon2id de KDBX externos sao recusados nesta versao.
-- A .key de recuperacao tem 32 bytes. Guarde fora do iPhone.
-- Para modo Senha + YubiKey, a recuperacao exige senha + .key.
-- Use conta GitHub bem protegida; comprometer a origem web compromete um PWA.
-- Nao houve auditoria externa independente.
+NOVA ABA VOLUMES
+- seleciona um arquivo-container VeraCrypt local;
+- senha, PIM e keyfiles não são enviados a servidor;
+- suporte atual: AES-256-XTS + PBKDF2 SHA-512/SHA-256;
+- FAT12/16/32 e exFAT;
+- somente leitura; arquivos escolhidos são exportados em texto claro;
+- YubiKey PIV não é acessada diretamente. O backup de 64 bytes do objeto 5FC103 pode ser escolhido como keyfile comum.
+
+TESTE PRIMEIRO COM CONTAINER DESCARTÁVEL. NÃO USE O ÚNICO EXEMPLAR DE DADOS CRÍTICOS.
