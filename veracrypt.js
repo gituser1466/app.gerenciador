@@ -120,9 +120,16 @@ async function applyKeyfiles(password,keyfiles){
   if(keyfiles.length>MAX_KEYFILES){wipe(pass);throw new Error(`Use no máximo ${MAX_KEYFILES} keyfiles por abertura.`);}
   const poolSize=pass.length<=64?64:128, pool=new Uint8Array(poolSize); pool.set(pass); wipe(pass);
   for(const file of keyfiles){
-    if(!file || typeof file.slice!=='function')throw new Error('Keyfile inválido.');
-    const len=Math.min(Number(file.size)||0,MAX_KEYFILE_BYTES); if(len<1)throw new Error('Keyfile vazio não é aceito.');
-    const bytes=new Uint8Array(await file.slice(0,len).arrayBuffer()); let state=0xffffffff,pos=0;
+    let bytes;
+    if(file instanceof Uint8Array){
+      if(file.length<1)throw new Error('Keyfile vazio não é aceito.');
+      bytes=file.slice(0,MAX_KEYFILE_BYTES);
+    }else{
+      if(!file || typeof file.slice!=='function')throw new Error('Keyfile inválido.');
+      const len=Math.min(Number(file.size)||0,MAX_KEYFILE_BYTES); if(len<1)throw new Error('Keyfile vazio não é aceito.');
+      bytes=new Uint8Array(await file.slice(0,len).arrayBuffer());
+    }
+    let state=0xffffffff,pos=0;
     try{
       for(const b of bytes){ state=crcUpdate(state,b); const v=[state>>>24,(state>>>16)&255,(state>>>8)&255,state&255]; for(const x of v){pool[pos]=(pool[pos]+x)&255;pos++;if(pos>=pool.length)pos=0;} }
     } finally { wipe(bytes); }

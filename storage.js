@@ -2,6 +2,7 @@ const DB_NAME = 'meucofre-local';
 const DB_VERSION = 1;
 const STORE = 'state';
 const VAULT_KEY = 'vault-record';
+const VC_FIDO_KEY = 'veracrypt-fido-profile';
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -57,4 +58,24 @@ export async function putVaultRecord(record) {
 
 export async function deleteVaultRecord() {
   return run('readwrite', (store) => store.delete(VAULT_KEY));
+}
+
+export async function getVeraCryptFidoProfile() {
+  const db = await openDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).get(VC_FIDO_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error || new Error('Falha ao ler a configuração VeraCrypt FIDO2.'));
+    });
+  } finally { db.close(); }
+}
+
+export async function putVeraCryptFidoProfile(profile) {
+  return run('readwrite', (store) => store.put(structuredClone(profile), VC_FIDO_KEY));
+}
+
+export async function deleteVeraCryptFidoProfile() {
+  return run('readwrite', (store) => store.delete(VC_FIDO_KEY));
 }

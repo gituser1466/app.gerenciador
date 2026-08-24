@@ -1,18 +1,15 @@
-MEU COFRE 1.1.0 - KDBX 4.1 + LEITOR VERACRYPT
+MEU COFRE 1.2.0 - KDBX 4.1 + VERACRYPT FIDO2
 
-ATUALIZAR NO GITHUB PAGES
-1. Faça backup do seu .kdbx antes da atualização.
-2. Envie TODOS os arquivos deste pacote para a RAIZ do MESMO repositório.
-3. Não mude o endereço GitHub Pages.
-4. Aguarde o deploy e abra o PWA com internet.
-5. Aceite o banner de atualização.
+PACOTE GITHUB PAGES SEM PASTAS INTERNAS.
+Envie todos os arquivos deste diretório para a raiz do mesmo repositório GitHub Pages.
 
-NOVA ABA VOLUMES
-- seleciona um arquivo-container VeraCrypt local;
-- senha, PIM e keyfiles não são enviados a servidor;
-- suporte atual: AES-256-XTS + PBKDF2 SHA-512/SHA-256;
-- FAT12/16/32 e exFAT;
-- somente leitura; arquivos escolhidos são exportados em texto claro;
-- YubiKey PIV não é acessada diretamente. O backup de 64 bytes do objeto 5FC103 pode ser escolhido como keyfile comum.
+NOVIDADE 1.2.0
+- VeraCrypt pode usar uma chave aleatória de 64 bytes protegida por YubiKey FIDO2/WebAuthn PRF.
+- Duas YubiKeys diferentes liberam a MESMA chave VeraCrypt por invólucros criptográficos independentes.
+- O segredo PRF interno das YubiKeys não é clonado.
+- Há um cofre de recuperação .vcrecovery cifrado por senha.
+- O keyfile bruto de 64 bytes só deve ser exportado para configurar/recuperar o VeraCrypt oficial.
 
-TESTE PRIMEIRO COM CONTAINER DESCARTÁVEL. NÃO USE O ÚNICO EXEMPLAR DE DADOS CRÍTICOS.
+IMPORTANTE
+Antes de alterar um volume real, teste em uma CÓPIA do container e faça backup do header no VeraCrypt oficial.
+A PWA continua em modo somente leitura para o conteúdo do container.

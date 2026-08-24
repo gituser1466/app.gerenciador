@@ -1,6 +1,6 @@
 {
   "id":"./","name":"Meu Cofre","short_name":"Meu Cofre",
-  "description":"Gerenciador local e offline com KDBX 4.1, YubiKey/WebAuthn PRF e leitor de containers VeraCrypt.",
+  "description":"Gerenciador local e offline com KDBX 4.1, YubiKey/WebAuthn PRF, KDBX 4.1 e leitor VeraCrypt com chave FIDO2 compartilhada.",
   "lang":"pt-BR","start_url":"./","scope":"./","display":"standalone",
   "background_color":"#090b10","theme_color":"#090b10","categories":["security","utilities"],
   "icons":[

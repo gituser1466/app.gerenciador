@@ -11,16 +11,16 @@
   <meta name="apple-mobile-web-app-title" content="Meu Cofre">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'self'; manifest-src 'self'; media-src 'none'">
   <title>Meu Cofre</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=1.1.0">
-  <link rel="icon" href="./icon-192.png?v=1.1.0" sizes="192x192">
-  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=1.1.0">
-  <link rel="stylesheet" href="./styles.css?v=1.1.0">
+  <link rel="manifest" href="./manifest.webmanifest?v=1.2.0">
+  <link rel="icon" href="./icon-192.png?v=1.2.0" sizes="192x192">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=1.2.0">
+  <link rel="stylesheet" href="./styles.css?v=1.2.0">
 </head>
 <body>
   <main class="shell">
     <div class="brand" id="public-brand">
       <div class="brand-mark">⌁</div>
-      <div><h1>Meu Cofre</h1><p>KDBX 4.1 local, offline e sem servidor de senhas</p><small id="public-version" class="hint">v1.1.0</small></div>
+      <div><h1>Meu Cofre</h1><p>KDBX 4.1 local, offline e sem servidor de senhas</p><small id="public-version" class="hint">v1.2.0</small></div>
     </div>
 
     <section id="screen-setup" hidden>
@@ -97,7 +97,35 @@
           <div class="section"><h3>Diagnóstico de segurança</h3><div class="card" id="security-diagnostics"></div></div>
         </section>
         <section class="view" data-view="veracrypt">
-          <div class="section"><h3>VeraCrypt</h3>
+          <div class="section"><h3>VeraCrypt + YubiKey FIDO2</h3>
+            <div class="card stack">
+              <div class="security-note">O FIDO2 não permite clonar o segredo PRF de uma credencial para outra YubiKey. O Meu Cofre resolve isso de forma segura: cria uma chave VeraCrypt aleatória de 64 bytes e guarda a mesma chave cifrada separadamente para cada YubiKey. Assim, qualquer uma das duas libera exatamente o mesmo keyfile VeraCrypt, sem armazená-lo em texto claro.</div>
+              <div id="vc-fido-empty" class="stack">
+                <p class="hint">Crie a configuração usando a primeira YubiKey e uma senha independente para o cofre de recuperação. Depois cadastre a segunda YubiKey.</p>
+                <label>Senha do cofre de recuperação<input id="vc-fido-new-recovery" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false"></label>
+                <label>Repetir senha de recuperação<input id="vc-fido-new-recovery2" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false"></label>
+                <button class="btn" id="vc-fido-create">Criar chave VeraCrypt e cadastrar YubiKey 1</button>
+              </div>
+              <div id="vc-fido-configured" class="stack" hidden>
+                <div id="vc-fido-summary" class="hint"></div>
+                <label>YubiKey para usar<select id="vc-fido-slot"></select></label>
+                <div class="actions"><button class="btn" id="vc-fido-open">Abrir container com YubiKey</button><button class="btn secondary" id="vc-fido-add-key">Adicionar outra YubiKey</button></div>
+                <button class="btn secondary" id="vc-fido-export-recovery">Exportar cofre de recuperação por senha</button>
+                <button class="btn danger" id="vc-fido-export-keyfile">Exportar keyfile bruto de 64 bytes</button>
+                <p class="hint">O keyfile bruto serve para configurar o volume no VeraCrypt oficial. Ele substitui a YubiKey enquanto existir; mantenha-o somente pelo tempo necessário e use uma cópia do volume no primeiro teste.</p>
+                <button class="btn ghost" id="vc-fido-reset">Remover configuração FIDO2 deste iPhone</button>
+              </div>
+              <details class="recovery-details"><summary>Recuperação por senha</summary><div class="recovery-body stack">
+                <label>Senha do cofre de recuperação<input id="vc-fido-recovery-password" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false"></label>
+                <button class="btn secondary" id="vc-fido-open-recovery">Abrir container usando backup por senha</button>
+                <button class="btn ghost" id="vc-fido-import-recovery">Importar arquivo .vcrecovery</button>
+                <input type="file" id="vc-fido-recovery-file" accept=".vcrecovery,application/json" hidden>
+                <div id="vc-fido-import-status" class="hint"></div>
+                <button class="btn secondary" id="vc-fido-restore-profile" hidden>Restaurar FIDO2 a partir deste backup</button>
+              </div></details>
+            </div>
+          </div>
+          <div class="section"><h3>VeraCrypt — senha/keyfiles tradicionais</h3>
             <div class="card stack">
               <div class="security-note">Leitor local de containers VeraCrypt. A senha e os keyfiles são usados somente em memória e não são gravados no Meu Cofre.</div>
               <button class="btn secondary" id="vc-choose-file">Selecionar container</button>
@@ -122,12 +150,12 @@
             <div class="section"><h3>Volume aberto</h3><div class="card stack"><div id="vc-metadata" class="status-grid"></div><button class="btn danger" id="vc-close">Fechar e apagar chaves da memória</button></div></div>
             <div class="section" id="vc-browser-section"><h3>Arquivos</h3><div class="card stack"><div class="vc-browser-head"><button class="btn ghost small" id="vc-back" hidden>Voltar</button><div id="vc-path" class="vc-path">Raiz</div></div><div id="vc-files" class="vc-files"></div><p class="hint">Modo somente leitura nesta versão. Ao tocar em um arquivo, uma cópia descriptografada é exportada pelo navegador.</p></div></div>
           </div>
-          <div class="section"><div class="card"><p class="hint">Compatibilidade atual: containers de arquivo não-sistema, AES-256-XTS, PBKDF2-HMAC-SHA-512/SHA-256, PIM, keyfiles comuns e FAT12/16/32 e exFAT. Argon2id, Serpent/Twofish/Camellia/Kuznyechik, exFAT/NTFS/APFS e YubiKey PIV ainda não são abertos por este módulo.</p></div></div>
+          <div class="section"><div class="card"><p class="hint">Compatibilidade atual: containers de arquivo não-sistema, AES-256-XTS, PBKDF2-HMAC-SHA-512/SHA-256, PIM, keyfiles comuns, chave compartilhada via YubiKey FIDO2/PRF e FAT12/16/32/exFAT. Argon2id, Serpent/Twofish/Camellia/Kuznyechik, NTFS/HFS+/APFS e YubiKey PIV/PKCS#11 direto ainda não são suportados.</p></div></div>
         </section>
         <section class="view" data-view="settings">
           <div class="section"><h3>Bloqueio automático</h3><div class="card stack"><label>Por inatividade (minutos)<input id="setting-idle" type="number" min="1" max="120"></label><label>Ao deixar o app em segundo plano (segundos)<input id="setting-background" type="number" min="0" max="300"></label><label>Limpar área de transferência após (segundos)<input id="setting-clipboard" type="number" min="0" max="300"></label><button class="btn secondary" id="save-settings">Salvar configurações</button></div></div>
           <div class="section"><h3>Armazenamento</h3><div class="card stack"><button class="btn secondary" id="request-persistent">Solicitar armazenamento persistente</button><div id="persistent-status" class="hint"></div></div></div>
-          <div class="section"><h3>Sobre</h3><div class="card stack"><div class="row"><div class="row-main"><div class="row-title">Meu Cofre</div><div class="row-sub">1.1.0 · KDBX 4.1 + leitor VeraCrypt · módulo em validação</div></div></div><div class="security-note">Sem telemetria, sem CDN e sem servidor de senhas. A hospedagem entrega apenas o código. Um comprometimento da origem web ainda é um risco estrutural de qualquer PWA; proteja sua conta GitHub e o repositório com autenticação forte.</div></div></div>
+          <div class="section"><h3>Sobre</h3><div class="card stack"><div class="row"><div class="row-main"><div class="row-title">Meu Cofre</div><div class="row-sub">1.2.0 · KDBX 4.1 + VeraCrypt FIDO2 · módulo em validação</div></div></div><div class="security-note">Sem telemetria, sem CDN e sem servidor de senhas. A hospedagem entrega apenas o código. Um comprometimento da origem web ainda é um risco estrutural de qualquer PWA; proteja sua conta GitHub e o repositório com autenticação forte.</div></div></div>
         </section>
       </div>
       <nav class="bottom-nav" aria-label="Navegação"><button class="nav-btn active" data-nav="vault"><span>⌂</span>Cofre</button><button class="nav-btn" data-nav="generator"><span>✦</span>Gerador</button><button class="nav-btn" data-nav="veracrypt"><span>◇</span>Volumes</button><button class="nav-btn" data-nav="security"><span>⌾</span>Segurança</button><button class="nav-btn" data-nav="settings"><span>⚙</span>Ajustes</button></nav>
@@ -138,6 +166,6 @@
 
   <div id="toast" class="toast" hidden></div>
   <div id="update-banner" class="update-banner" hidden><strong>Atualização disponível</strong><div class="hint">A nova versão só será ativada quando você confirmar.</div><div class="actions"><button class="btn small" id="apply-update">Atualizar agora</button><button class="btn ghost small" id="dismiss-update">Depois</button></div></div>
-  <script type="module" src="./app.js?v=1.1.0"></script>
+  <script type="module" src="./app.js?v=1.2.0"></script>
 </body>
 </html>

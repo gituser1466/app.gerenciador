@@ -171,7 +171,7 @@ textarea { min-height:110px; resize:vertical; }
 .danger-note { border-left-color:var(--danger); background:#25161a; color:#ffd7db; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior:auto!important; transition:none!important; animation:none!important; } }
 
-/* v1.1.0 — módulo VeraCrypt */
+/* v1.2.0 — módulo VeraCrypt + FIDO2 */
 #screen-app .bottom-nav { grid-template-columns: repeat(5, 1fr); }
 .vc-browser-head { display:flex; align-items:center; gap:10px; min-height:34px; }
 .vc-path { color:var(--text); font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

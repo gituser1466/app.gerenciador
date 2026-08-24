@@ -1,4 +1,4 @@
-import { getVaultRecord, putVaultRecord } from './storage.js';
+import { deleteVeraCryptFidoProfile, getVaultRecord, getVeraCryptFidoProfile, putVaultRecord, putVeraCryptFidoProfile } from './storage.js';
 import {
   FORMAT as LEGACY_FORMAT,
   getUnlockPolicy as legacyGetUnlockPolicy,
@@ -33,9 +33,10 @@ import { generatePassword } from './generator.js';
 import { totp } from './totp.js';
 import { openVeraCryptFile } from './veracrypt.js';
 import { openSupportedFileSystem } from './filesystem.js';
+import { addSlot as addVeraCryptFidoSlot, createProfile as createVeraCryptFidoProfile, openRecoveryVault as openVeraCryptRecoveryVault, rawKeyfileBlob, recoveryFromFile, recoveryToBlob, unwrapSecretFromSlot, validateProfile as validateVeraCryptFidoProfile, wrapSecretForRegistration } from './veracrypt-fido.js';
 import { base64ToBytes, bytesToBase64, clampInt, downloadBlob, formatDateTime, safeHttpUrl, uuid, wipe } from './utils.js';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const $ = (id) => document.getElementById(id);
 let record = null;
 let session = null;
@@ -52,6 +53,8 @@ let vcVolume = null;
 let vcFs = null;
 let vcPath = [];
 let vcDirectoryRequest = 0;
+let vcFidoProfile = null;
+let vcImportedRecovery = null;
 
 function isLegacyRecord(value) { return value?.format === LEGACY_FORMAT; }
 function isLegacySession() { return session?.kind === 'legacy'; }
@@ -81,6 +84,9 @@ async function init() {
   bindEvents();
   $('public-version').textContent = `v${APP_VERSION}`;
   record = await getVaultRecord();
+  vcFidoProfile = await getVeraCryptFidoProfile();
+  if (vcFidoProfile) { try { validateVeraCryptFidoProfile(vcFidoProfile); } catch (e) { console.warn('Configuração VeraCrypt FIDO2 ignorada:', e); vcFidoProfile = null; } }
+  renderVcFido();
   if (!record) setPublicScreen('setup');
   else {
     if (!isLegacyRecord(record) && !isKdbxRecord(record)) throw new Error('Formato local desconhecido. Restaure um backup válido.');
@@ -130,6 +136,16 @@ function bindEvents() {
   $('vc-password').addEventListener('keydown', e => { if (e.key === 'Enter') openVcContainer(); });
   $('vc-close').addEventListener('click', () => closeVeraCryptSession(true));
   $('vc-back').addEventListener('click', vcGoBack);
+  $('vc-fido-create').addEventListener('click', createVcFidoConfiguration);
+  $('vc-fido-open').addEventListener('click', openVcWithFido);
+  $('vc-fido-add-key').addEventListener('click', addVcFidoKey);
+  $('vc-fido-export-keyfile').addEventListener('click', exportVcFidoRawKeyfile);
+  $('vc-fido-export-recovery').addEventListener('click', exportVcFidoRecovery);
+  $('vc-fido-open-recovery').addEventListener('click', openVcWithRecovery);
+  $('vc-fido-import-recovery').addEventListener('click', () => $('vc-fido-recovery-file').click());
+  $('vc-fido-recovery-file').addEventListener('change', e => importVcRecovery(e.target.files?.[0]));
+  $('vc-fido-restore-profile').addEventListener('click', restoreVcFidoProfileFromRecovery);
+  $('vc-fido-reset').addEventListener('click', resetVcFidoConfiguration);
   $('add-yubikey').addEventListener('click', () => addWebAuthnMethod('security-key'));
   $('add-passkey').addEventListener('click', () => addWebAuthnMethod('platform'));
   $('export-recovery-key').addEventListener('click', exportRecoveryKey);
@@ -146,7 +162,7 @@ function bindEvents() {
   ['pointerdown','keydown','touchstart'].forEach(n => window.addEventListener(n, resetIdleTimer, {passive:true}));
   document.addEventListener('visibilitychange', handleVisibility);
   window.addEventListener('pagehide', clearSessionMemory);
-  renderSetupMode(); renderMigrationMode();
+  renderSetupMode(); renderMigrationMode(); renderVcFido();
 }
 
 function renderSetupMode() {
@@ -269,6 +285,109 @@ function toggleEntryPassword(){const i=$('entry-password');i.type=i.type==='pass
 function openCurrentUrl(){const url=safeHttpUrl($('entry-url').value);if(!url)return showToast('URL inválida ou não permitida.','error');window.open(url.href,'_blank','noopener,noreferrer');}
 
 
+
+function selectedVcFidoSlot(){
+  if(!vcFidoProfile)return null;
+  const id=$('vc-fido-slot')?.value;
+  return vcFidoProfile.slots.find(slot=>slot.id===id)||vcFidoProfile.slots[0]||null;
+}
+function shortFingerprint(value){return value?`${value.slice(0,12)}…${value.slice(-12)}`:'—';}
+function renderVcFido(){
+  if(!$('vc-fido-empty'))return;
+  const configured=!!vcFidoProfile;
+  $('vc-fido-empty').hidden=configured;
+  $('vc-fido-configured').hidden=!configured;
+  if(configured){
+    const select=$('vc-fido-slot');select.replaceChildren();
+    for(const slot of vcFidoProfile.slots){const o=document.createElement('option');o.value=slot.id;o.textContent=slot.label||'YubiKey FIDO2';select.append(o);}
+    $('vc-fido-summary').textContent=`Chave VeraCrypt compartilhada: ${shortFingerprint(vcFidoProfile.fingerprint)} · ${vcFidoProfile.slots.length} YubiKey(s) · backup por senha ${vcFidoProfile.recovery?'configurado':'ausente'}.`;
+    $('vc-fido-add-key').disabled=vcFidoProfile.slots.length>=8;
+    $('vc-fido-open-recovery').disabled=!vcFidoProfile.recovery&&!vcImportedRecovery;
+    $('vc-fido-export-recovery').disabled=!vcFidoProfile.recovery;
+  }else{
+    $('vc-fido-open-recovery').disabled=!vcImportedRecovery;
+  }
+  $('vc-fido-import-status').textContent=vcImportedRecovery?`Backup importado: ${shortFingerprint(vcImportedRecovery.fingerprint)}. Informe a senha para abrir ou restaurar a configuração FIDO2.`:'';
+  $('vc-fido-restore-profile').hidden=!vcImportedRecovery||configured;
+}
+async function createVcFidoConfiguration(){
+  if(vcFidoProfile)return showToast('A configuração FIDO2 já existe.','error');
+  const password=$('vc-fido-new-recovery').value,repeat=$('vc-fido-new-recovery2').value;
+  try{requireStrongEnough(password);if(password!==repeat)throw new Error('As senhas de recuperação não coincidem.');}
+  catch(e){return showToast(e.message,'error');}
+  const btn=$('vc-fido-create');const old=btn.textContent;btn.disabled=true;let prf=null,shared=null;
+  try{
+    btn.textContent='Cadastre a YubiKey 1...';
+    const reg=await registerPrfCredential({webauthnUserId:bytesToBase64(crypto.getRandomValues(new Uint8Array(32)))},'security-key');prf=reg.prfSecret;
+    reg.registration.label='YubiKey 1';
+    btn.textContent='Protegendo a chave compartilhada...';
+    const created=await createVeraCryptFidoProfile(reg.registration,prf,password);shared=created.secret;vcFidoProfile=created.profile;
+    await putVeraCryptFidoProfile(vcFidoProfile);clearSecretInputs();renderVcFido();
+    showToast('FIDO2 configurado. Cadastre a segunda YubiKey e exporte o cofre de recuperação.','success');
+  }catch(e){showToast(e.message||String(e),'error');}
+  finally{prf&&wipe(prf);shared&&wipe(shared);btn.disabled=false;btn.textContent=old;}
+}
+async function getVcFidoSecretFromSelectedKey(button=null){
+  if(!vcFidoProfile)throw new Error('Configure primeiro o módulo VeraCrypt FIDO2.');
+  const slot=selectedVcFidoSlot();if(!slot)throw new Error('Nenhuma YubiKey FIDO2 cadastrada.');
+  const old=button?.textContent;if(button){button.disabled=true;button.textContent='Aguardando YubiKey...';}
+  let prf=null;
+  try{prf=await evaluatePrf(slot);return await unwrapSecretFromSlot(vcFidoProfile,slot,prf);}
+  finally{prf&&wipe(prf);if(button){button.disabled=false;button.textContent=old;}}
+}
+async function addVcFidoKey(){
+  const btn=$('vc-fido-add-key');let secret=null,prf=null;
+  try{
+    secret=await getVcFidoSecretFromSelectedKey(btn);
+    btn.disabled=true;btn.textContent='Cadastre a nova YubiKey...';
+    const reg=await registerPrfCredential({webauthnUserId:bytesToBase64(crypto.getRandomValues(new Uint8Array(32)))},'security-key');prf=reg.prfSecret;
+    reg.registration.label=`YubiKey ${vcFidoProfile.slots.length+1}`;
+    vcFidoProfile=await addVeraCryptFidoSlot(vcFidoProfile,secret,reg.registration,prf,reg.registration.label);
+    await putVeraCryptFidoProfile(vcFidoProfile);renderVcFido();showToast('Nova YubiKey cadastrada para a mesma chave VeraCrypt.','success');
+  }catch(e){showToast(e.message||String(e),'error');}
+  finally{secret&&wipe(secret);prf&&wipe(prf);btn.disabled=false;btn.textContent='Adicionar outra YubiKey';}
+}
+async function exportVcFidoRawKeyfile(){
+  if(!confirm('Este arquivo de 64 bytes é a chave VeraCrypt em estado bruto. Quem obtiver uma cópia poderá substituir a YubiKey. Exporte somente para configurar/recuperar o VeraCrypt e apague a cópia temporária depois.'))return;
+  const btn=$('vc-fido-export-keyfile');let secret=null;
+  try{secret=await getVcFidoSecretFromSelectedKey(btn);downloadBlob(rawKeyfileBlob(secret),`MeuCofre-VeraCrypt-FIDO-${new Date().toISOString().slice(0,10)}.key`);showToast('Keyfile bruto exportado. Trate-o como segredo crítico.','success');}
+  catch(e){showToast(e.message||String(e),'error');}finally{secret&&wipe(secret);}
+}
+function exportVcFidoRecovery(){
+  if(!vcFidoProfile?.recovery)return showToast('Nenhum cofre de recuperação configurado.','error');
+  downloadBlob(recoveryToBlob(vcFidoProfile.recovery),`MeuCofre-VeraCrypt-Recovery-${new Date().toISOString().slice(0,10)}.vcrecovery`);
+  showToast('Cofre de recuperação criptografado exportado.','success');
+}
+async function importVcRecovery(file){
+  if(!file)return;
+  try{vcImportedRecovery=await recoveryFromFile(file);renderVcFido();showToast('Cofre de recuperação importado na memória.','success');}
+  catch(e){showToast(e.message||String(e),'error');}
+  finally{$('vc-fido-recovery-file').value='';}
+}
+async function getRecoverySecret(){
+  const recovery=vcImportedRecovery||vcFidoProfile?.recovery;if(!recovery)throw new Error('Importe ou configure um cofre de recuperação.');
+  const password=$('vc-fido-recovery-password').value;if(!password)throw new Error('Informe a senha do cofre de recuperação.');
+  return openVeraCryptRecoveryVault(recovery,password);
+}
+async function restoreVcFidoProfileFromRecovery(){
+  if(vcFidoProfile)return showToast('Já existe uma configuração FIDO2 local.','error');
+  const btn=$('vc-fido-restore-profile');let secret=null,prf=null;
+  try{
+    secret=await getRecoverySecret();btn.disabled=true;btn.textContent='Cadastre uma YubiKey...';
+    const reg=await registerPrfCredential({webauthnUserId:bytesToBase64(crypto.getRandomValues(new Uint8Array(32)))},'security-key');prf=reg.prfSecret;reg.registration.label='YubiKey 1';
+    const profile={format:'meucofre-veracrypt-fido-v1',version:1,id:uuid(),createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),fingerprint:vcImportedRecovery.fingerprint,slots:[],recovery:structuredClone(vcImportedRecovery)};
+    profile.slots.push(await wrapSecretForRegistration(profile.id,secret,reg.registration,prf,'YubiKey 1'));
+    vcFidoProfile=profile;await putVeraCryptFidoProfile(profile);vcImportedRecovery=null;clearSecretInputs();renderVcFido();showToast('Configuração FIDO2 restaurada a partir do backup por senha.','success');
+  }catch(e){showToast(e.message||String(e),'error');}
+  finally{secret&&wipe(secret);prf&&wipe(prf);btn.disabled=false;btn.textContent='Restaurar FIDO2 a partir deste backup';}
+}
+async function resetVcFidoConfiguration(){
+  if(!vcFidoProfile)return;
+  if(!confirm('Apagar a configuração FIDO2 local? Faça antes o backup .vcrecovery e confirme que uma YubiKey ou o backup por senha realmente libera a chave. Os containers VeraCrypt não serão alterados.'))return;
+  if(!confirm('Confirma a remoção dos invólucros FIDO2 deste iPhone?'))return;
+  await deleteVeraCryptFidoProfile();vcFidoProfile=null;renderVcFido();showToast('Configuração FIDO2 local removida.');
+}
+
 function formatVcBytes(value){
   const n=Number(value)||0;
   if(n<1024)return `${n} B`;
@@ -330,15 +449,15 @@ function renderVcMetadata(fileSystemError=null){
   addVcMeta('Setor',`${i.sectorSize||512} bytes`);
   addVcMeta('Sistema de arquivos',vcFs?.info?.type||(fileSystemError?`não suportado (${fileSystemError.message||fileSystemError})`:'não identificado'));
 }
-async function openVcContainer(){
+async function openVcUsing({password='',keyfiles=[],button,statusPrefix='Lendo cabeçalho e derivando a chave localmente.'}={}){
   if(!session)return showToast('Desbloqueie o Meu Cofre primeiro.','error');
   if(!vcSelectedFile)return showToast('Selecione um container VeraCrypt.','error');
-  const btn=$('vc-open');const old=btn.textContent;btn.disabled=true;btn.textContent='Derivando chave...';
+  const btn=button||$('vc-open');const old=btn.textContent;btn.disabled=true;btn.textContent='Derivando chave...';
   resetVcOpenedState();
   let volume=null;
   try{
-    $('vc-status').textContent='Lendo cabeçalho e derivando a chave localmente. Arquivos grandes não são enviados para nenhum servidor.';
-    volume=await openVeraCryptFile(vcSelectedFile,{password:$('vc-password').value,pim:$('vc-pim').value,keyfiles:vcKeyfiles,hash:$('vc-kdf').value,hidden:$('vc-volume-type').value==='hidden'});
+    $('vc-status').textContent=`${statusPrefix} Arquivos grandes não são enviados para nenhum servidor.`;
+    volume=await openVeraCryptFile(vcSelectedFile,{password,pim:$('vc-pim').value,keyfiles,hash:$('vc-kdf').value,hidden:$('vc-volume-type').value==='hidden'});
     vcVolume=volume;volume=null;
     let fsError=null;
     try{vcFs=await openSupportedFileSystem(vcVolume);}catch(e){fsError=e;vcFs=null;}
@@ -360,6 +479,28 @@ async function openVcContainer(){
     $('vc-status').textContent=e.message||String(e);
     showToast(`Não foi possível abrir o container: ${e.message||e}`,'error');
   }finally{btn.disabled=false;btn.textContent=old;}
+}
+async function openVcContainer(){
+  return openVcUsing({password:$('vc-password').value,keyfiles:vcKeyfiles,button:$('vc-open')});
+}
+async function openVcWithFido(){
+  const btn=$('vc-fido-open');let secret=null;
+  try{
+    if(!vcSelectedFile)throw new Error('Selecione primeiro o container VeraCrypt.');
+    secret=await getVcFidoSecretFromSelectedKey(btn);
+    await openVcUsing({password:'',keyfiles:[secret],button:btn,statusPrefix:'YubiKey validada. Usando a chave VeraCrypt compartilhada somente em memória.'});
+  }catch(e){showToast(e.message||String(e),'error');}
+  finally{secret&&wipe(secret);}
+}
+async function openVcWithRecovery(){
+  const btn=$('vc-fido-open-recovery');let secret=null;
+  try{
+    if(!vcSelectedFile)throw new Error('Selecione primeiro o container VeraCrypt.');
+    secret=await getRecoverySecret();
+    await openVcUsing({password:'',keyfiles:[secret],button:btn,statusPrefix:'Backup por senha validado. Usando a chave VeraCrypt recuperada somente em memória.'});
+    $('vc-fido-recovery-password').value='';
+  }catch(e){showToast(e.message||String(e),'error');}
+  finally{secret&&wipe(secret);}
 }
 async function renderVcDirectory(){
   if(!vcFs||!vcPath.length)return;
