@@ -1,9 +1,9 @@
-MEU COFRE 1.2.0 - KDBX 4.1 + VERACRYPT FIDO2
+MEU COFRE 1.3.0 - ENTRADA KDBX + VAULT VERACRYPT
 
 PACOTE GITHUB PAGES SEM PASTAS INTERNAS.
 Envie todos os arquivos deste diretório para a raiz do mesmo repositório GitHub Pages.
 
-NOVIDADE 1.2.0
+NOVIDADE 1.3.0
 - VeraCrypt pode usar uma chave aleatória de 64 bytes protegida por YubiKey FIDO2/WebAuthn PRF.
 - Duas YubiKeys diferentes liberam a MESMA chave VeraCrypt por invólucros criptográficos independentes.
 - O segredo PRF interno das YubiKeys não é clonado.
@@ -13,3 +13,5 @@ NOVIDADE 1.2.0
 IMPORTANTE
 Antes de alterar um volume real, teste em uma CÓPIA do container e faça backup do header no VeraCrypt oficial.
 A PWA continua em modo somente leitura para o conteúdo do container.
+
+A tela inicial agora permite escolher KDBX ou Vault VeraCrypt. O VeraCrypt funciona sem desbloquear o KDBX. Ao alternar, a sessão anterior é fechada.

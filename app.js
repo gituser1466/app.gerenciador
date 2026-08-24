@@ -36,7 +36,7 @@ import { openSupportedFileSystem } from './filesystem.js';
 import { addSlot as addVeraCryptFidoSlot, createProfile as createVeraCryptFidoProfile, openRecoveryVault as openVeraCryptRecoveryVault, rawKeyfileBlob, recoveryFromFile, recoveryToBlob, unwrapSecretFromSlot, validateProfile as validateVeraCryptFidoProfile, wrapSecretForRegistration } from './veracrypt-fido.js';
 import { base64ToBytes, bytesToBase64, clampInt, downloadBlob, formatDateTime, safeHttpUrl, uuid, wipe } from './utils.js';
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const $ = (id) => document.getElementById(id);
 let record = null;
 let session = null;
@@ -65,8 +65,8 @@ function showToast(message, type = '') {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 4200);
 }
 function setPublicScreen(name) {
-  for (const id of ['setup','unlock','app']) $(`screen-${id}`).hidden = id !== name;
-  $('public-brand').hidden = name === 'app';
+  for (const id of ['home','setup','unlock','veracrypt','app']) $(`screen-${id}`).hidden = id !== name;
+  $('public-brand').hidden = name === 'app' || name === 'veracrypt';
 }
 function clearSecretInputs() {
   document.querySelectorAll('input[type="password"]').forEach((el) => { el.value = ''; });
@@ -87,17 +87,22 @@ async function init() {
   vcFidoProfile = await getVeraCryptFidoProfile();
   if (vcFidoProfile) { try { validateVeraCryptFidoProfile(vcFidoProfile); } catch (e) { console.warn('Configuração VeraCrypt FIDO2 ignorada:', e); vcFidoProfile = null; } }
   renderVcFido();
-  if (!record) setPublicScreen('setup');
-  else {
-    if (!isLegacyRecord(record) && !isKdbxRecord(record)) throw new Error('Formato local desconhecido. Restaure um backup válido.');
-    renderUnlockMethods(); setPublicScreen('unlock');
-  }
+  if (record && !isLegacyRecord(record) && !isKdbxRecord(record)) throw new Error('Formato local desconhecido. Restaure um backup válido.');
+  renderHome();
+  setPublicScreen('home');
   generateNewPassword();
   await updatePersistentStatus();
   registerServiceWorker();
 }
 
 function bindEvents() {
+  $('home-open-veracrypt').addEventListener('click', openVeraCryptFromHome);
+  $('home-open-kdbx').addEventListener('click', openKdbxFromHome);
+  $('vc-home-btn').addEventListener('click', returnToHome);
+  $('setup-home-btn').addEventListener('click', returnToHome);
+  $('unlock-home-btn').addEventListener('click', returnToHome);
+  $('app-home-btn').addEventListener('click', returnToHome);
+  $('open-veracrypt-from-app').addEventListener('click', openVeraCryptFromApp);
   $('setup-mode').addEventListener('change', renderSetupMode);
   $('setup-create').addEventListener('click', createVaultFromSetup);
   $('setup-import-kdbx').addEventListener('click', () => $('setup-import-kdbx-file').click());
@@ -163,6 +168,42 @@ function bindEvents() {
   document.addEventListener('visibilitychange', handleVisibility);
   window.addEventListener('pagehide', clearSessionMemory);
   renderSetupMode(); renderMigrationMode(); renderVcFido();
+}
+
+function renderHome() {
+  const status = $('home-kdbx-status');
+  if (!status) return;
+  if (!record) status.textContent = 'Criar ou importar um KDBX';
+  else if (isLegacyRecord(record)) status.textContent = 'Cofre legado encontrado · desbloquear e migrar';
+  else status.textContent = 'KDBX local encontrado · desbloquear';
+}
+function openKdbxFromHome() {
+  closeVeraCryptSession(true);
+  clearSecretInputs();
+  if (!record) setPublicScreen('setup');
+  else { renderUnlockMethods(); setPublicScreen('unlock'); }
+}
+function openVeraCryptFromHome() {
+  if (session) clearSessionMemory();
+  clearSecretInputs();
+  renderVcFido();
+  setPublicScreen('veracrypt');
+  $('vc-standalone-scroll').scrollTop = 0;
+}
+function openVeraCryptFromApp() {
+  clearSessionMemory();
+  renderHome();
+  renderVcFido();
+  setPublicScreen('veracrypt');
+  $('vc-standalone-scroll').scrollTop = 0;
+  showToast('KDBX bloqueado antes de abrir o Vault VeraCrypt.');
+}
+function returnToHome() {
+  if (session) clearSessionMemory();
+  else closeVeraCryptSession(true);
+  clearSecretInputs();
+  renderHome();
+  setPublicScreen('home');
 }
 
 function renderSetupMode() {
@@ -272,7 +313,7 @@ function enterApp(){setPublicScreen('app');$('app-vault-name').textContent=sessi
 function clearSessionMemory(){closeVeraCryptSession(true);if(session?.vaultKey)wipe(session.vaultKey);for(const c of session?.components||[])wipe(c);session=null;editingId=null;clearTimeout(idleTimer);clearTimeout(backgroundTimer);clearTimeout(clipboardTimer);stopTotpTimer();clearSecretInputs();}
 function lockVault(message){clearSessionMemory();closeEntryModal();renderUnlockMethods();setPublicScreen('unlock');if(message)showToast(message);}
 function resetIdleTimer(){if(!session)return;clearTimeout(idleTimer);const m=clampInt(session.vault.settings?.idleLockMinutes,1,120,5);idleTimer=setTimeout(()=>lockVault('Bloqueado por inatividade.'),m*60000);}
-function handleVisibility(){if(!session)return;clearTimeout(backgroundTimer);if(document.hidden){const s=clampInt(session.vault.settings?.backgroundLockSeconds,0,300,0);if(s===0)lockVault('Bloqueado ao sair do aplicativo.');else backgroundTimer=setTimeout(()=>lockVault('Bloqueado em segundo plano.'),s*1000);}}
+function handleVisibility(){clearTimeout(backgroundTimer);if(document.hidden&&vcVolume&&!session){closeVeraCryptSession(false);return;}if(!session)return;if(document.hidden){const s=clampInt(session.vault.settings?.backgroundLockSeconds,0,300,0);if(s===0)lockVault('Bloqueado ao sair do aplicativo.');else backgroundTimer=setTimeout(()=>lockVault('Bloqueado em segundo plano.'),s*1000);}}
 function navigate(view){document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.dataset.view===view));document.querySelectorAll('[data-nav]').forEach(el=>el.classList.toggle('active',el.dataset.nav===view));if(view==='security')renderSecurity();if(view==='settings')renderSettings();$('app-scroll').scrollTop=0;}
 
 function entryMatches(e,t){if(!t)return true;return[e.title,e.username,e.url,...(e.tags||[])].join(' ').toLocaleLowerCase('pt-BR').includes(t);}
@@ -450,7 +491,6 @@ function renderVcMetadata(fileSystemError=null){
   addVcMeta('Sistema de arquivos',vcFs?.info?.type||(fileSystemError?`não suportado (${fileSystemError.message||fileSystemError})`:'não identificado'));
 }
 async function openVcUsing({password='',keyfiles=[],button,statusPrefix='Lendo cabeçalho e derivando a chave localmente.'}={}){
-  if(!session)return showToast('Desbloqueie o Meu Cofre primeiro.','error');
   if(!vcSelectedFile)return showToast('Selecione um container VeraCrypt.','error');
   const btn=button||$('vc-open');const old=btn.textContent;btn.disabled=true;btn.textContent='Derivando chave...';
   resetVcOpenedState();

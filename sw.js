@@ -1,21 +1,21 @@
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const CACHE = `meucofre-shell-v${APP_VERSION}`;
 
 // Hashes gerados no fechamento da release. O Service Worker recusa uma instalação
 // parcial/corrompida. Isso protege contra erro de upload/cache; não substitui a
 // segurança da conta/origem de hospedagem, pois quem controla a origem controla o SW.
 const ASSET_HASHES = Object.freeze({
-  './index.html': 'c6cce88bc47171eff00a4f19c876eb9078eb0f9892b33573c2121f267a923ec6',
-  './styles.css': 'e56db760893599cb74e024f55413a134fb4912964c7bd38a308951ddc4099533',
-  './manifest.webmanifest': 'c832d2f33b3db7864543077136d04514fcac3c531b51f9784f2a8cae71379c21',
+  './index.html': '7244d58bc201156fd8a2e5d896d4d46d678862d07f149f3c0062bf178f28e3ec',
+  './styles.css': '26b9d86a216317635ca1f27da502b33af94677e9da73f93371440cb1f3a256fd',
+  './manifest.webmanifest': '4db57446d82ae0e9e9c5b3a2ee3346a06ad60092f62d0914e0910701e4ac4e62',
   './icon-192.png': '8dd0fc36a67b996a4586d795b92510d2f7e22a22d9ba8a4bb0b569653a7c2ad0',
   './icon-512.png': '0c81756a3fed05816ba2c236e75092ccbce3a3c08e3edea9c3253b5abeb7e51e',
   './apple-touch-icon.png': '5e0434ff5e6d4b54a376bb72ee9dfca9eb7cf04d152f6fb275bbb7c558e65e6e',
-  './app.js': '03da2f72f33a95a6fd533fc226e66b5e24b4881c654001dcce4e3ec3941a8daa',
+  './app.js': 'e10b0244146acc811aad9269d7f85f714026ed633b55a1665b24e6eb0631fa76',
   './utils.js': 'fb5a397fda790ba7f596b6eb2ca1e8a72bb67578eaa0c406f466205cafa8a70b',
   './storage.js': '3cf245ba8b4f6cada59ec97b5b66371780f821a481811fa34bcb26c008e795cc',
   './legacy-vault.js': 'd663a38de94a994c4ba1a713a6934556327b192464fb9867bff145b0826481f3',
-  './kdbx.js': 'c462232e889caaca8161bb869dd9beb4250e7cfabfc39c1dda57b6b73a1959e8',
+  './kdbx.js': 'fd8ef590e8ba0ea16b265523d687ff76b194fd0dd6e70385e083c920f3c31b5f',
   './webauthn.js': 'a4e9bb9fbea5780f341e034dc64737b6838755a00482c92f0614c59345a59f36',
   './totp.js': '137058587a6d0db77a751f7731b8795baf0cfff3ebb70e550dc6a36144a80679',
   './generator.js': '81197ae74f52857dbcaa61581b462a7a442c4c909d045d9b2708490610582085',

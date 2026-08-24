@@ -171,7 +171,7 @@ textarea { min-height:110px; resize:vertical; }
 .danger-note { border-left-color:var(--danger); background:#25161a; color:#ffd7db; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior:auto!important; transition:none!important; animation:none!important; } }
 
-/* v1.2.0 — módulo VeraCrypt + FIDO2 */
+/* v1.3.0 — launcher KDBX / Vault VeraCrypt + módulo FIDO2 */
 #screen-app .bottom-nav { grid-template-columns: repeat(5, 1fr); }
 .vc-browser-head { display:flex; align-items:center; gap:10px; min-height:34px; }
 .vc-path { color:var(--text); font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -184,3 +184,28 @@ textarea { min-height:110px; resize:vertical; }
 .vc-file-meta { color:var(--muted); font-size:12px; margin-top:2px; }
 .vc-file-action { color:var(--muted); font-size:12px; }
 @media (max-width: 430px) { .nav-btn { font-size:10px; padding-left:1px; padding-right:1px; } .nav-btn span { font-size:18px; } }
+
+
+/* v1.3.0 — tela inicial e VeraCrypt independente do KDBX */
+.home-screen { display:grid; gap:18px; }
+.home-copy { margin-top:2px; }
+.launcher-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.launcher-card { width:100%; min-height:144px; border:1px solid var(--line); border-radius:22px; background:linear-gradient(145deg,rgba(22,29,39,.98),rgba(13,17,24,.98)); color:var(--text); padding:20px; display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:14px; align-items:center; text-align:left; box-shadow:var(--shadow); cursor:pointer; }
+.launcher-card:active { transform:scale(.992); }
+.launcher-card:focus-visible { outline:3px solid rgba(112,225,180,.35); outline-offset:2px; }
+.launcher-icon { width:52px; height:52px; border-radius:16px; display:grid; place-items:center; background:#172b24; color:var(--accent); font-size:27px; border:1px solid #2a5b49; }
+.launcher-main { display:grid; gap:6px; min-width:0; }
+.launcher-main strong { font-size:20px; letter-spacing:-.02em; }
+.launcher-main small { color:var(--muted); font-size:13px; line-height:1.4; }
+.launcher-chevron { color:var(--muted); font-size:30px; font-weight:300; }
+.home-note { margin-top:2px; }
+.public-back { margin-bottom:12px; }
+.standalone-screen { position:fixed; inset:0; width:min(920px,100%); height:100%; margin:0 auto; padding:0 14px; overflow:hidden; background:radial-gradient(circle at 20% 0%, #15241f 0, var(--bg) 36rem); }
+@supports (height:100dvh) { .standalone-screen { height:100dvh; } }
+.standalone-topbar { position:absolute; z-index:50; left:14px; right:14px; top:0; display:flex; align-items:center; gap:12px; padding:max(12px,env(safe-area-inset-top)) 0 12px; background:linear-gradient(180deg,rgba(9,11,16,.98),rgba(9,11,16,.86),rgba(9,11,16,0)); backdrop-filter:blur(18px); }
+.standalone-title { min-width:0; }
+.standalone-title h2 { margin:0; font-size:20px; }
+.standalone-title small { color:var(--muted); }
+.standalone-scroll { position:absolute; inset:0 14px; overflow-x:hidden; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior-y:contain; padding-top:calc(82px + env(safe-area-inset-top)); padding-bottom:calc(28px + env(safe-area-inset-bottom)); }
+@media (min-width:921px) { .standalone-screen { padding-left:18px; padding-right:18px; } .standalone-topbar,.standalone-scroll { left:18px; right:18px; } }
+@media (max-width:620px) { .launcher-grid { grid-template-columns:1fr; } .launcher-card { min-height:118px; padding:17px; } }
