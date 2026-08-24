@@ -1,17 +1,14 @@
-MEU COFRE 1.3.0 - ENTRADA KDBX + VAULT VERACRYPT
+MEU COFRE 1.4.0 - KDBX + VAULT VERACRYPT VINCULADO
 
-PACOTE GITHUB PAGES SEM PASTAS INTERNAS.
-Envie todos os arquivos deste diretório para a raiz do mesmo repositório GitHub Pages.
+Envie TODOS os arquivos desta pasta para a raiz do mesmo repositorio GitHub Pages.
+Nao envie o ZIP. Nao mude o dominio/origem se ja cadastrou YubiKeys WebAuthn.
 
-NOVIDADE 1.3.0
-- VeraCrypt pode usar uma chave aleatória de 64 bytes protegida por YubiKey FIDO2/WebAuthn PRF.
-- Duas YubiKeys diferentes liberam a MESMA chave VeraCrypt por invólucros criptográficos independentes.
-- O segredo PRF interno das YubiKeys não é clonado.
-- Há um cofre de recuperação .vcrecovery cifrado por senha.
-- O keyfile bruto de 64 bytes só deve ser exportado para configurar/recuperar o VeraCrypt oficial.
+NOVIDADE 1.4.0
+- Vincular um container VeraCrypt ja existente no Mac.
+- Guardar senha/PIM/keyfiles somente dentro de pacote cifrado.
+- Duas ou mais YubiKeys FIDO2 independentes liberam o mesmo perfil.
+- Recovery por senha.
+- Exportar/importar perfil .vcprofile.
+- Testar cada YubiKey e o recovery antes de depender do fluxo.
 
-IMPORTANTE
-Antes de alterar um volume real, teste em uma CÓPIA do container e faça backup do header no VeraCrypt oficial.
-A PWA continua em modo somente leitura para o conteúdo do container.
-
-A tela inicial agora permite escolher KDBX ou Vault VeraCrypt. O VeraCrypt funciona sem desbloquear o KDBX. Ao alternar, a sessão anterior é fechada.
+Antes de atualizar, exporte seu KDBX e qualquer .vcprofile importante.

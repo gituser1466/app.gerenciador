@@ -3,6 +3,7 @@ const DB_VERSION = 1;
 const STORE = 'state';
 const VAULT_KEY = 'vault-record';
 const VC_FIDO_KEY = 'veracrypt-fido-profile';
+const VC_LINKED_PROFILES_KEY = 'veracrypt-linked-profiles-v1';
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -78,4 +79,26 @@ export async function putVeraCryptFidoProfile(profile) {
 
 export async function deleteVeraCryptFidoProfile() {
   return run('readwrite', (store) => store.delete(VC_FIDO_KEY));
+}
+
+
+export async function getVeraCryptLinkedProfiles() {
+  const db = await openDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).get(VC_LINKED_PROFILES_KEY);
+      req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
+      req.onerror = () => reject(req.error || new Error('Falha ao ler os vaults VeraCrypt vinculados.'));
+    });
+  } finally { db.close(); }
+}
+
+export async function putVeraCryptLinkedProfiles(profiles) {
+  if (!Array.isArray(profiles)) throw new Error('Lista de vaults VeraCrypt inválida.');
+  return run('readwrite', (store) => store.put(structuredClone(profiles), VC_LINKED_PROFILES_KEY));
+}
+
+export async function deleteVeraCryptLinkedProfiles() {
+  return run('readwrite', (store) => store.delete(VC_LINKED_PROFILES_KEY));
 }

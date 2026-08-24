@@ -209,3 +209,17 @@ textarea { min-height:110px; resize:vertical; }
 .standalone-scroll { position:absolute; inset:0 14px; overflow-x:hidden; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior-y:contain; padding-top:calc(82px + env(safe-area-inset-top)); padding-bottom:calc(28px + env(safe-area-inset-bottom)); }
 @media (min-width:921px) { .standalone-screen { padding-left:18px; padding-right:18px; } .standalone-topbar,.standalone-scroll { left:18px; right:18px; } }
 @media (max-width:620px) { .launcher-grid { grid-template-columns:1fr; } .launcher-card { min-height:118px; padding:17px; } }
+
+/* v1.4 — vaults VeraCrypt vinculados */
+.pill.warn { color:#ffd997; border-color:#765c2d; background:#2a2112; }
+.linked-profile-list { display:grid; gap:12px; }
+.linked-profile-card { display:grid; gap:11px; padding:14px; border:1px solid var(--line); border-radius:16px; background:rgba(9,12,17,.66); }
+.linked-profile-head { display:flex; gap:12px; align-items:flex-start; justify-content:space-between; }
+.linked-toolbar { display:flex; gap:12px; align-items:flex-start; justify-content:space-between; }
+.linked-profile-card details { margin-top:2px; }
+.linked-profile-card .actions .btn { min-width:140px; }
+@media (max-width:620px) {
+  .linked-profile-head { align-items:flex-start; }
+  .linked-profile-card .pill { flex:0 0 auto; }
+  .linked-profile-card .actions .btn { min-width:0; }
+}

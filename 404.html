@@ -11,16 +11,16 @@
   <meta name="apple-mobile-web-app-title" content="Meu Cofre">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'self'; manifest-src 'self'; media-src 'none'">
   <title>Meu Cofre</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=1.3.0">
-  <link rel="icon" href="./icon-192.png?v=1.3.0" sizes="192x192">
-  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=1.3.0">
-  <link rel="stylesheet" href="./styles.css?v=1.3.0">
+  <link rel="manifest" href="./manifest.webmanifest?v=1.4.0">
+  <link rel="icon" href="./icon-192.png?v=1.4.0" sizes="192x192">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=1.4.0">
+  <link rel="stylesheet" href="./styles.css?v=1.4.0">
 </head>
 <body>
   <main class="shell">
     <div class="brand" id="public-brand">
       <div class="brand-mark">⌁</div>
-      <div><h1>Meu Cofre</h1><p>KDBX 4.1 + Vault VeraCrypt local e offline</p><small id="public-version" class="hint">v1.3.0</small></div>
+      <div><h1>Meu Cofre</h1><p>KDBX 4.1 + Vault VeraCrypt local e offline</p><small id="public-version" class="hint">v1.4.0</small></div>
     </div>
 
     <section id="screen-home" class="home-screen" hidden>
@@ -31,7 +31,7 @@
       <div class="launcher-grid">
         <button type="button" class="launcher-card" id="home-open-veracrypt">
           <span class="launcher-icon" aria-hidden="true">◇</span>
-          <span class="launcher-main"><strong>Vault VeraCrypt</strong><small>Abrir um container VeraCrypt local no iPhone</small></span>
+          <span class="launcher-main"><strong>Vault VeraCrypt</strong><small id="home-vc-status">Abrir ou vincular um container VeraCrypt</small></span>
           <span class="launcher-chevron" aria-hidden="true">›</span>
         </button>
         <button type="button" class="launcher-card" id="home-open-kdbx">
@@ -46,12 +46,43 @@
     <section id="screen-veracrypt" class="standalone-screen" hidden>
       <header class="standalone-topbar">
         <button type="button" class="btn ghost small" id="vc-home-btn">← Início</button>
-        <div class="standalone-title"><h2>Vault VeraCrypt</h2><small>Leitura local e somente leitura</small></div>
+        <div class="standalone-title"><h2>Vault VeraCrypt</h2><small>Vaults vinculados · FIDO2 · recovery · leitura local</small></div>
       </header>
       <div class="standalone-scroll" id="vc-standalone-scroll">
-          <div class="section"><h3>VeraCrypt + YubiKey FIDO2</h3>
+          <div class="section"><h3>Meus vaults VeraCrypt</h3>
             <div class="card stack">
-              <div class="security-note">O FIDO2 não permite clonar o segredo PRF de uma credencial para outra YubiKey. O Meu Cofre resolve isso de forma segura: cria uma chave VeraCrypt aleatória de 64 bytes e guarda a mesma chave cifrada separadamente para cada YubiKey. Assim, qualquer uma das duas libera exatamente o mesmo keyfile VeraCrypt, sem armazená-lo em texto claro.</div>
+              <div class="linked-toolbar"><div><strong id="vc-linked-count">0 vaults vinculados</strong><div class="hint">Use o mesmo container criado no VeraCrypt oficial do Mac. As credenciais ficam cifradas e podem ser liberadas por qualquer YubiKey cadastrada ou pela senha de recuperação.</div></div></div>
+              <div class="actions"><button class="btn" id="vc-linked-new">Vincular vault existente</button><button class="btn secondary" id="vc-linked-import">Importar .vcprofile</button></div>
+              <input type="file" id="vc-linked-import-file" accept=".vcprofile,application/json" hidden>
+              <input type="file" id="vc-linked-container-file" hidden>
+              <div id="vc-linked-list" class="linked-profile-list"></div>
+            </div>
+          </div>
+          <div class="section" id="vc-link-wizard" hidden><h3>Vincular vault existente</h3>
+            <div class="card stack">
+              <div class="security-note">O Meu Cofre primeiro testa as credenciais no próprio container. Só depois cadastra a YubiKey e grava um perfil cifrado. O container não é modificado.</div>
+              <label>Nome do vault<input id="vc-link-name" maxlength="100" autocomplete="off" placeholder="Ex.: Documentos"></label>
+              <button class="btn secondary" id="vc-link-choose-file">Selecionar container VeraCrypt</button>
+              <input type="file" id="vc-link-file" hidden>
+              <div id="vc-link-file-info" class="hint">Nenhum container selecionado.</div>
+              <label>Senha atual do VeraCrypt<input id="vc-link-password" type="password" autocomplete="off" autocapitalize="none" spellcheck="false"><span class="hint">Pode ficar vazia se o volume usa somente keyfile.</span></label>
+              <div class="grid-2">
+                <label>PIM<input id="vc-link-pim" type="number" min="0" max="20000" value="0" inputmode="numeric"></label>
+                <label>KDF<select id="vc-link-kdf"><option value="auto">Automático (SHA-512 / SHA-256)</option><option value="SHA-512">PBKDF2 SHA-512</option><option value="SHA-256">PBKDF2 SHA-256</option></select></label>
+              </div>
+              <label>Tipo de volume<select id="vc-link-volume-type"><option value="normal">Volume normal</option><option value="hidden">Volume oculto</option></select></label>
+              <button class="btn ghost" id="vc-link-choose-keyfiles">Adicionar keyfile(s) atuais</button>
+              <input type="file" id="vc-link-keyfiles" multiple hidden>
+              <div id="vc-link-keyfile-info" class="hint">Sem keyfiles.</div>
+              <div class="security-note">Se o volume atual usa o objeto PIV 5FC103, selecione aqui a cópia canônica de 64 bytes do keyfile. O arquivo será processado e guardado somente dentro do pacote cifrado do perfil.</div>
+              <label>Senha de recuperação do perfil<input id="vc-link-recovery" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false"></label>
+              <label>Repetir senha de recuperação<input id="vc-link-recovery2" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false"></label>
+              <div class="actions"><button class="btn" id="vc-link-create">Testar e cadastrar YubiKey 1</button><button class="btn ghost" id="vc-link-cancel">Cancelar</button></div>
+            </div>
+          </div>
+          <div class="section"><h3>Gerar novo keyfile FIDO2</h3>
+            <div class="card stack">
+              <div class="security-note">Modo opcional para criar um keyfile novo de 64 bytes. Para um vault que já existe no Mac, prefira “Vincular vault existente” acima; assim você não altera o container nem suas credenciais atuais.</div>
               <div id="vc-fido-empty" class="stack">
                 <p class="hint">Crie a configuração usando a primeira YubiKey e uma senha independente para o cofre de recuperação. Depois cadastre a segunda YubiKey.</p>
                 <label>Senha do cofre de recuperação<input id="vc-fido-new-recovery" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false"></label>
@@ -184,7 +215,7 @@
         <section class="view" data-view="settings">
           <div class="section"><h3>Bloqueio automático</h3><div class="card stack"><label>Por inatividade (minutos)<input id="setting-idle" type="number" min="1" max="120"></label><label>Ao deixar o app em segundo plano (segundos)<input id="setting-background" type="number" min="0" max="300"></label><label>Limpar área de transferência após (segundos)<input id="setting-clipboard" type="number" min="0" max="300"></label><button class="btn secondary" id="save-settings">Salvar configurações</button></div></div>
           <div class="section"><h3>Armazenamento</h3><div class="card stack"><button class="btn secondary" id="request-persistent">Solicitar armazenamento persistente</button><div id="persistent-status" class="hint"></div></div></div>
-          <div class="section"><h3>Sobre</h3><div class="card stack"><div class="row"><div class="row-main"><div class="row-title">Meu Cofre</div><div class="row-sub">1.3.0 · entrada separada KDBX / Vault VeraCrypt · módulo VeraCrypt em validação</div></div></div><div class="security-note">Sem telemetria, sem CDN e sem servidor de senhas. A hospedagem entrega apenas o código. Um comprometimento da origem web ainda é um risco estrutural de qualquer PWA; proteja sua conta GitHub e o repositório com autenticação forte.</div></div></div>
+          <div class="section"><h3>Sobre</h3><div class="card stack"><div class="row"><div class="row-main"><div class="row-title">Meu Cofre</div><div class="row-sub">1.4.0 · vaults VeraCrypt vinculados + 2 YubiKeys + recovery + KDBX</div></div></div><div class="security-note">Sem telemetria, sem CDN e sem servidor de senhas. A hospedagem entrega apenas o código. Um comprometimento da origem web ainda é um risco estrutural de qualquer PWA; proteja sua conta GitHub e o repositório com autenticação forte.</div></div></div>
         </section>
       </div>
       <nav class="bottom-nav" aria-label="Navegação"><button class="nav-btn active" data-nav="vault"><span>⌂</span>Cofre</button><button class="nav-btn" data-nav="generator"><span>✦</span>Gerador</button><button class="nav-btn" id="open-veracrypt-from-app"><span>◇</span>Volumes</button><button class="nav-btn" data-nav="security"><span>⌾</span>Segurança</button><button class="nav-btn" data-nav="settings"><span>⚙</span>Ajustes</button></nav>
@@ -195,6 +226,6 @@
 
   <div id="toast" class="toast" hidden></div>
   <div id="update-banner" class="update-banner" hidden><strong>Atualização disponível</strong><div class="hint">A nova versão só será ativada quando você confirmar.</div><div class="actions"><button class="btn small" id="apply-update">Atualizar agora</button><button class="btn ghost small" id="dismiss-update">Depois</button></div></div>
-  <script type="module" src="./app.js?v=1.3.0"></script>
+  <script type="module" src="./app.js?v=1.4.0"></script>
 </body>
 </html>

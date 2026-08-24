@@ -1,4 +1,4 @@
-import { deleteVeraCryptFidoProfile, getVaultRecord, getVeraCryptFidoProfile, putVaultRecord, putVeraCryptFidoProfile } from './storage.js';
+import { deleteVeraCryptFidoProfile, getVaultRecord, getVeraCryptFidoProfile, getVeraCryptLinkedProfiles, putVaultRecord, putVeraCryptFidoProfile, putVeraCryptLinkedProfiles } from './storage.js';
 import {
   FORMAT as LEGACY_FORMAT,
   getUnlockPolicy as legacyGetUnlockPolicy,
@@ -34,9 +34,10 @@ import { totp } from './totp.js';
 import { openVeraCryptFile } from './veracrypt.js';
 import { openSupportedFileSystem } from './filesystem.js';
 import { addSlot as addVeraCryptFidoSlot, createProfile as createVeraCryptFidoProfile, openRecoveryVault as openVeraCryptRecoveryVault, rawKeyfileBlob, recoveryFromFile, recoveryToBlob, unwrapSecretFromSlot, validateProfile as validateVeraCryptFidoProfile, wrapSecretForRegistration } from './veracrypt-fido.js';
+import { addLinkedProfileSlot, buildCredentialBundle, changeRecoveryPassword as changeLinkedRecoveryPassword, createLinkedProfile, decryptBundle as decryptLinkedBundle, materializeBundleCredentials, profileFromFile as linkedProfileFromFile, profileToBlob as linkedProfileToBlob, removeLinkedProfileSlot, unwrapDekFromRecovery as unwrapLinkedDekFromRecovery, unwrapDekFromSlot as unwrapLinkedDekFromSlot, validateLinkedProfile, verifyContainerAgainstProfile, wipeMaterializedCredentials } from './veracrypt-linked.js';
 import { base64ToBytes, bytesToBase64, clampInt, downloadBlob, formatDateTime, safeHttpUrl, uuid, wipe } from './utils.js';
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const $ = (id) => document.getElementById(id);
 let record = null;
 let session = null;
@@ -55,6 +56,10 @@ let vcPath = [];
 let vcDirectoryRequest = 0;
 let vcFidoProfile = null;
 let vcImportedRecovery = null;
+let vcLinkedProfiles = [];
+let vcLinkSelectedFile = null;
+let vcLinkKeyfiles = [];
+let vcLinkedPendingOpen = null;
 
 function isLegacyRecord(value) { return value?.format === LEGACY_FORMAT; }
 function isLegacySession() { return session?.kind === 'legacy'; }
@@ -86,6 +91,9 @@ async function init() {
   record = await getVaultRecord();
   vcFidoProfile = await getVeraCryptFidoProfile();
   if (vcFidoProfile) { try { validateVeraCryptFidoProfile(vcFidoProfile); } catch (e) { console.warn('Configuração VeraCrypt FIDO2 ignorada:', e); vcFidoProfile = null; } }
+  vcLinkedProfiles = await getVeraCryptLinkedProfiles();
+  vcLinkedProfiles = vcLinkedProfiles.filter((profile) => { try { validateLinkedProfile(profile); return true; } catch (e) { console.warn('Perfil VeraCrypt vinculado ignorado:', e); return false; } });
+  renderVcLinkedProfiles();
   renderVcFido();
   if (record && !isLegacyRecord(record) && !isKdbxRecord(record)) throw new Error('Formato local desconhecido. Restaure um backup válido.');
   renderHome();
@@ -141,6 +149,16 @@ function bindEvents() {
   $('vc-password').addEventListener('keydown', e => { if (e.key === 'Enter') openVcContainer(); });
   $('vc-close').addEventListener('click', () => closeVeraCryptSession(true));
   $('vc-back').addEventListener('click', vcGoBack);
+  $('vc-linked-new').addEventListener('click', () => showVcLinkWizard(true));
+  $('vc-link-cancel').addEventListener('click', () => showVcLinkWizard(false));
+  $('vc-link-choose-file').addEventListener('click', () => $('vc-link-file').click());
+  $('vc-link-file').addEventListener('change', e => selectVcLinkFile(e.target.files?.[0] || null));
+  $('vc-link-choose-keyfiles').addEventListener('click', () => $('vc-link-keyfiles').click());
+  $('vc-link-keyfiles').addEventListener('change', e => selectVcLinkKeyfiles([...(e.target.files || [])]));
+  $('vc-link-create').addEventListener('click', createVcLinkedProfileFromExisting);
+  $('vc-linked-import').addEventListener('click', () => $('vc-linked-import-file').click());
+  $('vc-linked-import-file').addEventListener('change', e => importVcLinkedProfile(e.target.files?.[0]));
+  $('vc-linked-container-file').addEventListener('change', e => continueVcLinkedOpen(e.target.files?.[0] || null));
   $('vc-fido-create').addEventListener('click', createVcFidoConfiguration);
   $('vc-fido-open').addEventListener('click', openVcWithFido);
   $('vc-fido-add-key').addEventListener('click', addVcFidoKey);
@@ -172,10 +190,13 @@ function bindEvents() {
 
 function renderHome() {
   const status = $('home-kdbx-status');
-  if (!status) return;
-  if (!record) status.textContent = 'Criar ou importar um KDBX';
-  else if (isLegacyRecord(record)) status.textContent = 'Cofre legado encontrado · desbloquear e migrar';
-  else status.textContent = 'KDBX local encontrado · desbloquear';
+  if (status) {
+    if (!record) status.textContent = 'Criar ou importar um KDBX';
+    else if (isLegacyRecord(record)) status.textContent = 'Cofre legado encontrado · desbloquear e migrar';
+    else status.textContent = 'KDBX local encontrado · desbloquear';
+  }
+  const vcStatus=$('home-vc-status');
+  if(vcStatus)vcStatus.textContent=vcLinkedProfiles.length?`${vcLinkedProfiles.length} vault(s) vinculado(s) · abrir com YubiKey ou recovery`:'Abrir ou vincular um container VeraCrypt';
 }
 function openKdbxFromHome() {
   closeVeraCryptSession(true);
@@ -186,6 +207,7 @@ function openKdbxFromHome() {
 function openVeraCryptFromHome() {
   if (session) clearSessionMemory();
   clearSecretInputs();
+  renderVcLinkedProfiles();
   renderVcFido();
   setPublicScreen('veracrypt');
   $('vc-standalone-scroll').scrollTop = 0;
@@ -193,6 +215,7 @@ function openVeraCryptFromHome() {
 function openVeraCryptFromApp() {
   clearSessionMemory();
   renderHome();
+  renderVcLinkedProfiles();
   renderVcFido();
   setPublicScreen('veracrypt');
   $('vc-standalone-scroll').scrollTop = 0;
@@ -325,7 +348,131 @@ async function deleteCurrentEntry(){if(!session||!editingId)return;const e=sessi
 function toggleEntryPassword(){const i=$('entry-password');i.type=i.type==='password'?'text':'password';$('entry-show-password').textContent=i.type==='password'?'Mostrar':'Ocultar';}
 function openCurrentUrl(){const url=safeHttpUrl($('entry-url').value);if(!url)return showToast('URL inválida ou não permitida.','error');window.open(url.href,'_blank','noopener,noreferrer');}
 
-
+function showVcLinkWizard(show){
+  $('vc-link-wizard').hidden=!show;
+  if(show){$('vc-link-name').focus();$('vc-standalone-scroll').scrollTo({top:0,behavior:'smooth'});}
+  else resetVcLinkWizard();
+}
+function resetVcLinkWizard(){
+  vcLinkSelectedFile=null;vcLinkKeyfiles=[];
+  for(const id of ['vc-link-name','vc-link-password','vc-link-recovery','vc-link-recovery2'])if($(id))$(id).value='';
+  if($('vc-link-pim'))$('vc-link-pim').value='0';if($('vc-link-kdf'))$('vc-link-kdf').value='auto';if($('vc-link-volume-type'))$('vc-link-volume-type').value='normal';
+  if($('vc-link-file'))$('vc-link-file').value='';if($('vc-link-keyfiles'))$('vc-link-keyfiles').value='';
+  if($('vc-link-file-info'))$('vc-link-file-info').textContent='Nenhum container selecionado.';
+  if($('vc-link-keyfile-info'))$('vc-link-keyfile-info').textContent='Sem keyfiles.';
+}
+function selectVcLinkFile(file){
+  vcLinkSelectedFile=file;
+  $('vc-link-file-info').textContent=file?`${file.name} · ${formatVcBytes(file.size)}`:'Nenhum container selecionado.';
+  if(file&&!$('vc-link-name').value.trim())$('vc-link-name').value=(file.name||'Vault VeraCrypt').replace(/\.(hc|tc|vc|veracrypt)$/i,'').slice(0,100);
+}
+function selectVcLinkKeyfiles(files){
+  vcLinkKeyfiles=files.slice(0,32);
+  $('vc-link-keyfile-info').textContent=vcLinkKeyfiles.length?`${vcLinkKeyfiles.length} keyfile(s): ${vcLinkKeyfiles.map(f=>f.name).join(', ')}`:'Sem keyfiles.';
+}
+async function persistVcLinkedProfiles(){await putVeraCryptLinkedProfiles(vcLinkedProfiles);renderVcLinkedProfiles();}
+function getVcLinkedProfile(id){return vcLinkedProfiles.find(p=>p.id===id)||null;}
+function vcLinkedStatus(profile){
+  if(profile.slots.length<2)return ['Cadastre YubiKey 2','warn'];
+  if(profile.slots.some(slot=>!slot.lastTestedAt))return ['Teste as YubiKeys','warn'];
+  if(!profile.lastRecoveryTestedAt)return ['Teste recovery','warn'];
+  return ['Pronto','ok'];
+}
+function appendText(el,tag,text,className=''){const n=document.createElement(tag);if(className)n.className=className;n.textContent=text;el.append(n);return n;}
+function renderVcLinkedProfiles(){
+  const list=$('vc-linked-list');if(!list)return;list.replaceChildren();
+  $('vc-linked-count').textContent=`${vcLinkedProfiles.length} ${vcLinkedProfiles.length===1?'vault vinculado':'vaults vinculados'}`;
+  if(!vcLinkedProfiles.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='Nenhum vault vinculado. Você pode usar um container já criado no VeraCrypt do Mac sem alterá-lo.';list.append(empty);return;}
+  for(const profile of vcLinkedProfiles){
+    const card=document.createElement('div');card.className='linked-profile-card';
+    const head=document.createElement('div');head.className='linked-profile-head';
+    const main=document.createElement('div');main.className='row-main';appendText(main,'div',profile.name,'row-title');appendText(main,'div',`${profile.container.name} · ${formatVcBytes(profile.container.size)} · ${profile.container.hidden?'oculto':'normal'} · ${profile.slots.length} YubiKey(s)`,'row-sub');
+    const [st,cls]=vcLinkedStatus(profile);const pill=document.createElement('span');pill.className=`pill ${cls}`;pill.textContent=st;head.append(main,pill);card.append(head);
+    const fp=document.createElement('div');fp.className='hint';fp.textContent=`Header: ${shortFingerprint(profile.container.headerFingerprint)}${profile.lastVerifiedAt?` · validado ${formatDateTime(profile.lastVerifiedAt)}`:''}`;card.append(fp);
+    const slotLabel=document.createElement('label');slotLabel.textContent='YubiKey';const select=document.createElement('select');select.id=`vc-linked-slot-${profile.id}`;for(const slot of profile.slots){const o=document.createElement('option');o.value=slot.id;o.textContent=`${slot.label||'YubiKey FIDO2'}${slot.lastTestedAt?' ✓':''}`;select.append(o);}slotLabel.append(select);card.append(slotLabel);
+    const actions=document.createElement('div');actions.className='actions';
+    const open=document.createElement('button');open.className='btn';open.textContent='Abrir com YubiKey';open.addEventListener('click',()=>queueVcLinkedOpen(profile.id,'fido',select.value));
+    const test=document.createElement('button');test.className='btn ghost';test.textContent='Testar YubiKey';test.addEventListener('click',()=>testVcLinkedFido(profile.id,select.value,test));
+    const add=document.createElement('button');add.className='btn secondary';add.textContent='Adicionar YubiKey';add.disabled=profile.slots.length>=8;add.addEventListener('click',()=>addVcLinkedKey(profile.id,select.value,add));actions.append(open,test,add);card.append(actions);
+    const exportBtn=document.createElement('button');exportBtn.className='btn secondary';exportBtn.textContent='Exportar perfil .vcprofile';exportBtn.addEventListener('click',()=>exportVcLinkedProfile(profile.id));card.append(exportBtn);
+    const details=document.createElement('details');details.className='recovery-details';const summary=document.createElement('summary');summary.textContent='Recuperação e manutenção';details.append(summary);const body=document.createElement('div');body.className='recovery-body stack';
+    const recLabel=document.createElement('label');recLabel.textContent='Senha de recuperação';const rec=document.createElement('input');rec.type='password';rec.autocomplete='current-password';rec.id=`vc-linked-recovery-${profile.id}`;recLabel.append(rec);body.append(recLabel);
+    const recActions=document.createElement('div');recActions.className='actions';const recOpen=document.createElement('button');recOpen.className='btn secondary';recOpen.textContent='Abrir com recovery';recOpen.addEventListener('click',()=>queueVcLinkedOpen(profile.id,'recovery',null,rec.id));const recTest=document.createElement('button');recTest.className='btn ghost';recTest.textContent='Testar recovery';recTest.addEventListener('click',()=>testVcLinkedRecovery(profile.id,rec.id,recTest));recActions.append(recOpen,recTest);body.append(recActions);
+    const new1=document.createElement('input');new1.type='password';new1.autocomplete='new-password';new1.placeholder='Nova senha de recuperação';new1.id=`vc-linked-newrec-${profile.id}`;const new2=document.createElement('input');new2.type='password';new2.autocomplete='new-password';new2.placeholder='Repetir nova senha';new2.id=`vc-linked-newrec2-${profile.id}`;body.append(new1,new2);
+    const change=document.createElement('button');change.className='btn secondary';change.textContent='Trocar senha de recuperação';change.addEventListener('click',()=>changeVcLinkedRecovery(profile.id,select.value,new1.id,new2.id,change));body.append(change);
+    const remove=document.createElement('button');remove.className='btn ghost';remove.textContent='Remover YubiKey selecionada';remove.disabled=profile.slots.length<=1;remove.addEventListener('click',()=>removeVcLinkedKey(profile.id,select.value));body.append(remove);
+    const del=document.createElement('button');del.className='btn danger';del.textContent='Excluir vínculo deste aparelho';del.addEventListener('click',()=>deleteVcLinkedProfile(profile.id));body.append(del);
+    appendText(body,'p','O .vcprofile contém as credenciais VeraCrypt somente cifradas. Guarde uma cópia fora do iPhone; sem ele, um aparelho novo não conhece os wrappers das YubiKeys.','hint');details.append(body);card.append(details);list.append(card);
+  }
+}
+async function createVcLinkedProfileFromExisting(){
+  const name=$('vc-link-name').value.trim(),recovery=$('vc-link-recovery').value,repeat=$('vc-link-recovery2').value;
+  if(!vcLinkSelectedFile)return showToast('Selecione o container VeraCrypt existente.','error');
+  try{requireStrongEnough(recovery);if(recovery!==repeat)throw new Error('As senhas de recuperação não coincidem.');}
+  catch(e){return showToast(e.message||String(e),'error');}
+  const btn=$('vc-link-create');const old=btn.textContent;let bundle=null,volume=null,prf=null;
+  try{
+    btn.disabled=true;btn.textContent='Validando o container...';
+    bundle=await buildCredentialBundle({password:$('vc-link-password').value,pim:$('vc-link-pim').value,hash:$('vc-link-kdf').value,hidden:$('vc-link-volume-type').value==='hidden',keyfiles:vcLinkKeyfiles});
+    volume=await openVeraCryptFile(vcLinkSelectedFile,{password:bundle.password,pim:bundle.pim,hash:bundle.hash,hidden:bundle.hidden,keyfiles:vcLinkKeyfiles});volume.close();volume=null;
+    btn.textContent='Cadastre a YubiKey 1...';
+    const reg=await registerPrfCredential({webauthnUserId:bytesToBase64(crypto.getRandomValues(new Uint8Array(32)))},'security-key');prf=reg.prfSecret;reg.registration.label='YubiKey 1';
+    btn.textContent='Cifrando as credenciais...';
+    const profile=await createLinkedProfile({name,file:vcLinkSelectedFile,bundle,registration:reg.registration,prfSecret:prf,recoveryPassword:recovery});
+    profile.rpId=location.hostname;
+    vcLinkedProfiles.push(profile);await persistVcLinkedProfiles();showVcLinkWizard(false);showToast('Vault vinculado. Agora cadastre a segunda YubiKey e teste o recovery.','success');
+  }catch(e){try{volume?.close?.();}catch{}showToast(e.message||String(e),'error');}
+  finally{if(bundle){bundle.password='';for(const k of bundle.keyfiles||[])k.data='';}prf&&wipe(prf);btn.disabled=false;btn.textContent=old;clearSecretInputs();}
+}
+function queueVcLinkedOpen(profileId,method,slotId=null,recoveryInputId=null){
+  const profile=getVcLinkedProfile(profileId);if(!profile)return showToast('Perfil VeraCrypt não encontrado.','error');
+  if(method==='recovery'&&!$(recoveryInputId)?.value)return showToast('Informe a senha de recuperação.','error');
+  vcLinkedPendingOpen={profileId,method,slotId,recoveryInputId};$('vc-linked-container-file').value='';$('vc-linked-container-file').click();
+}
+async function linkedBundleViaFido(profile,slotId,button=null){
+  const slot=profile.slots.find(s=>s.id===slotId)||profile.slots[0];if(!slot)throw new Error('YubiKey não encontrada.');
+  const old=button?.textContent;if(button){button.disabled=true;button.textContent='Aguardando YubiKey...';}
+  let prf=null,dek=null;
+  try{prf=await evaluatePrf(slot);dek=await unwrapLinkedDekFromSlot(profile,slot,prf);return await decryptLinkedBundle(profile,dek);}
+  finally{prf&&wipe(prf);dek&&wipe(dek);if(button){button.disabled=false;button.textContent=old;}}
+}
+async function linkedBundleViaRecovery(profile,password){let dek=null;try{dek=await unwrapLinkedDekFromRecovery(profile,password);return await decryptLinkedBundle(profile,dek);}finally{dek&&wipe(dek);}}
+async function continueVcLinkedOpen(file){
+  const pending=vcLinkedPendingOpen;vcLinkedPendingOpen=null;$('vc-linked-container-file').value='';if(!file||!pending)return;
+  const profile=getVcLinkedProfile(pending.profileId);if(!profile)return showToast('Perfil VeraCrypt não encontrado.','error');
+  let bundle=null,creds=null;
+  try{
+    const match=await verifyContainerAgainstProfile(profile,file);if(!match.ok&&!confirm('O header/tamanho deste arquivo não coincide com o vault vinculado. Tentar abrir mesmo assim?'))return;
+    selectVcFile(file);
+    if(pending.method==='fido')bundle=await linkedBundleViaFido(profile,pending.slotId);
+    else bundle=await linkedBundleViaRecovery(profile,$(pending.recoveryInputId)?.value||'');
+    creds=materializeBundleCredentials(bundle);
+    const opened=await openVcUsing({password:creds.password,keyfiles:creds.keyfiles,pim:creds.pim,hash:creds.hash,hidden:creds.hidden,button:$('vc-open'),statusPrefix:pending.method==='fido'?'YubiKey validada. Credenciais do vault liberadas somente em memória.':'Recovery validado. Credenciais do vault liberadas somente em memória.'});
+    if(!opened)return;
+    profile.lastVerifiedAt=new Date().toISOString();if(pending.method==='fido'){profile.lastFidoTestedAt=profile.lastVerifiedAt;const slot=profile.slots.find(s=>s.id===pending.slotId)||profile.slots[0];if(slot)slot.lastTestedAt=profile.lastVerifiedAt;}else profile.lastRecoveryTestedAt=profile.lastVerifiedAt;await persistVcLinkedProfiles();
+    if(pending.recoveryInputId)$(pending.recoveryInputId).value='';
+  }catch(e){showToast(e.message||String(e),'error');}
+  finally{if(creds)wipeMaterializedCredentials(creds);if(bundle){bundle.password='';for(const k of bundle.keyfiles||[])k.data='';}}
+}
+async function testVcLinkedFido(profileId,slotId,button){const profile=getVcLinkedProfile(profileId);if(!profile)return;let bundle=null;try{bundle=await linkedBundleViaFido(profile,slotId,button);const now=new Date().toISOString();profile.lastFidoTestedAt=now;const slot=profile.slots.find(s=>s.id===slotId)||profile.slots[0];if(slot)slot.lastTestedAt=now;await persistVcLinkedProfiles();showToast('YubiKey válida e pacote de credenciais autenticado.','success');}catch(e){showToast(e.message||String(e),'error');}finally{if(bundle){bundle.password='';for(const k of bundle.keyfiles||[])k.data='';}}}
+async function addVcLinkedKey(profileId,slotId,button){
+  const profile=getVcLinkedProfile(profileId);if(!profile)return;let bundle=null,prf=null,dek=null;
+  const slot=profile.slots.find(s=>s.id===slotId)||profile.slots[0];const old=button.textContent;
+  try{
+    button.disabled=true;button.textContent='Valide uma YubiKey já cadastrada...';prf=await evaluatePrf(slot);dek=await unwrapLinkedDekFromSlot(profile,slot,prf);wipe(prf);prf=null;
+    button.textContent='Cadastre a nova YubiKey...';const reg=await registerPrfCredential({webauthnUserId:bytesToBase64(crypto.getRandomValues(new Uint8Array(32)))},'security-key');prf=reg.prfSecret;reg.registration.label=`YubiKey ${profile.slots.length+1}`;
+    const next=await addLinkedProfileSlot(profile,dek,reg.registration,prf,reg.registration.label);vcLinkedProfiles=vcLinkedProfiles.map(p=>p.id===profile.id?next:p);await persistVcLinkedProfiles();showToast('Nova YubiKey adicionada ao mesmo vault.','success');
+  }catch(e){showToast(e.message||String(e),'error');}
+  finally{prf&&wipe(prf);dek&&wipe(dek);if(bundle)bundle.password='';button.disabled=false;button.textContent=old;}
+}
+function exportVcLinkedProfile(profileId){const profile=getVcLinkedProfile(profileId);if(!profile)return;const safe=profile.name.replace(/[^a-z0-9._-]+/gi,'_').slice(0,80)||'Vault';downloadBlob(linkedProfileToBlob(profile),`${safe}.vcprofile`);showToast('Perfil cifrado exportado. Guarde-o junto ao plano de recuperação.','success');}
+async function importVcLinkedProfile(file){
+  if(!file)return;try{const profile=await linkedProfileFromFile(file);if(profile.rpId&&profile.rpId!==location.hostname&&!confirm(`Este perfil foi criado para o domínio ${profile.rpId}. O domínio atual é ${location.hostname}; as YubiKeys FIDO2 provavelmente não funcionarão aqui. Importar mesmo assim para usar o recovery?`))return;const idx=vcLinkedProfiles.findIndex(p=>p.id===profile.id);if(idx>=0){if(!confirm('Este perfil já existe. Substituir a cópia local pelo arquivo importado?'))return;vcLinkedProfiles[idx]=profile;}else vcLinkedProfiles.push(profile);await persistVcLinkedProfiles();showToast('Perfil VeraCrypt importado.','success');}catch(e){showToast(e.message||String(e),'error');}finally{$('vc-linked-import-file').value='';}
+}
+async function testVcLinkedRecovery(profileId,inputId,button){const profile=getVcLinkedProfile(profileId);const password=$(inputId).value;if(!profile||!password)return showToast('Informe a senha de recuperação.','error');let dek=null,bundle=null;const old=button.textContent;try{button.disabled=true;button.textContent='Testando...';dek=await unwrapLinkedDekFromRecovery(profile,password);bundle=await decryptLinkedBundle(profile,dek);profile.lastRecoveryTestedAt=new Date().toISOString();await persistVcLinkedProfiles();showToast('Recovery válido e credenciais autenticadas.','success');$(inputId).value='';}catch(e){showToast(e.message||String(e),'error');}finally{dek&&wipe(dek);if(bundle){bundle.password='';for(const k of bundle.keyfiles||[])k.data='';}button.disabled=false;button.textContent=old;}}
+async function changeVcLinkedRecovery(profileId,slotId,newId,repeatId,button){const profile=getVcLinkedProfile(profileId),a=$(newId).value,b=$(repeatId).value;if(!profile)return;try{requireStrongEnough(a);if(a!==b)throw new Error('As novas senhas não coincidem.');}catch(e){return showToast(e.message||String(e),'error');}const slot=profile.slots.find(s=>s.id===slotId)||profile.slots[0];let prf=null,dek=null;const old=button.textContent;try{button.disabled=true;button.textContent='Valide a YubiKey...';prf=await evaluatePrf(slot);dek=await unwrapLinkedDekFromSlot(profile,slot,prf);const next=await changeLinkedRecoveryPassword(profile,dek,a);next.lastRecoveryTestedAt=null;vcLinkedProfiles=vcLinkedProfiles.map(p=>p.id===profile.id?next:p);await persistVcLinkedProfiles();$(newId).value='';$(repeatId).value='';showToast('Senha de recuperação alterada. Exporte um novo .vcprofile e teste a nova senha.','success');}catch(e){showToast(e.message||String(e),'error');}finally{prf&&wipe(prf);dek&&wipe(dek);button.disabled=false;button.textContent=old;}}
+async function removeVcLinkedKey(profileId,slotId){const profile=getVcLinkedProfile(profileId);if(!profile)return;if(profile.slots.length<=1)return showToast('Mantenha ao menos uma YubiKey.','error');const slot=profile.slots.find(s=>s.id===slotId);if(!slot)return;if(!confirm(`Remover “${slot.label||'YubiKey'}” deste vault? A credencial física não é apagada da YubiKey, apenas deixa de ser aceita pelo perfil.`))return;try{const next=removeLinkedProfileSlot(profile,slotId);vcLinkedProfiles=vcLinkedProfiles.map(p=>p.id===profile.id?next:p);await persistVcLinkedProfiles();showToast('YubiKey removida do perfil.','success');}catch(e){showToast(e.message||String(e),'error');}}
+async function deleteVcLinkedProfile(profileId){const profile=getVcLinkedProfile(profileId);if(!profile)return;if(!confirm(`Excluir o vínculo “${profile.name}” deste aparelho? Isso não altera o container VeraCrypt. Confirme que você possui o .vcprofile de recuperação.`))return;vcLinkedProfiles=vcLinkedProfiles.filter(p=>p.id!==profileId);await persistVcLinkedProfiles();showToast('Vínculo local removido.');}
 
 function selectedVcFidoSlot(){
   if(!vcFidoProfile)return null;
@@ -340,7 +487,7 @@ function renderVcFido(){
   $('vc-fido-configured').hidden=!configured;
   if(configured){
     const select=$('vc-fido-slot');select.replaceChildren();
-    for(const slot of vcFidoProfile.slots){const o=document.createElement('option');o.value=slot.id;o.textContent=slot.label||'YubiKey FIDO2';select.append(o);}
+    for(const slot of vcFidoProfile.slots){const o=document.createElement('option');o.value=slot.id;o.textContent=`${slot.label||'YubiKey FIDO2'}${slot.lastTestedAt?' ✓':''}`;select.append(o);}
     $('vc-fido-summary').textContent=`Chave VeraCrypt compartilhada: ${shortFingerprint(vcFidoProfile.fingerprint)} · ${vcFidoProfile.slots.length} YubiKey(s) · backup por senha ${vcFidoProfile.recovery?'configurado':'ausente'}.`;
     $('vc-fido-add-key').disabled=vcFidoProfile.slots.length>=8;
     $('vc-fido-open-recovery').disabled=!vcFidoProfile.recovery&&!vcImportedRecovery;
@@ -467,8 +614,15 @@ function closeVeraCryptSession(resetSelection=false){
   if($('vc-keyfile-info'))$('vc-keyfile-info').textContent='Sem keyfiles.';
   if(resetSelection){
     vcSelectedFile=null;
+    vcLinkSelectedFile=null;
+    vcLinkKeyfiles=[];
+    vcLinkedPendingOpen=null;
     if($('vc-file'))$('vc-file').value='';
     if($('vc-file-info'))$('vc-file-info').textContent='Nenhum container selecionado.';
+    if($('vc-link-file'))$('vc-link-file').value='';
+    if($('vc-link-keyfiles'))$('vc-link-keyfiles').value='';
+    if($('vc-link-file-info'))$('vc-link-file-info').textContent='Nenhum container selecionado.';
+    if($('vc-link-keyfile-info'))$('vc-link-keyfile-info').textContent='Sem keyfiles.';
   }
 }
 function addVcMeta(label,value){
@@ -490,14 +644,14 @@ function renderVcMetadata(fileSystemError=null){
   addVcMeta('Setor',`${i.sectorSize||512} bytes`);
   addVcMeta('Sistema de arquivos',vcFs?.info?.type||(fileSystemError?`não suportado (${fileSystemError.message||fileSystemError})`:'não identificado'));
 }
-async function openVcUsing({password='',keyfiles=[],button,statusPrefix='Lendo cabeçalho e derivando a chave localmente.'}={}){
+async function openVcUsing({password='',keyfiles=[],pim=null,hash=null,hidden=null,button,statusPrefix='Lendo cabeçalho e derivando a chave localmente.'}={}){
   if(!vcSelectedFile)return showToast('Selecione um container VeraCrypt.','error');
   const btn=button||$('vc-open');const old=btn.textContent;btn.disabled=true;btn.textContent='Derivando chave...';
   resetVcOpenedState();
   let volume=null;
   try{
     $('vc-status').textContent=`${statusPrefix} Arquivos grandes não são enviados para nenhum servidor.`;
-    volume=await openVeraCryptFile(vcSelectedFile,{password,pim:$('vc-pim').value,keyfiles,hash:$('vc-kdf').value,hidden:$('vc-volume-type').value==='hidden'});
+    volume=await openVeraCryptFile(vcSelectedFile,{password,pim:pim??$('vc-pim').value,keyfiles,hash:hash??$('vc-kdf').value,hidden:hidden??($('vc-volume-type').value==='hidden')});
     vcVolume=volume;volume=null;
     let fsError=null;
     try{vcFs=await openSupportedFileSystem(vcVolume);}catch(e){fsError=e;vcFs=null;}
@@ -513,11 +667,13 @@ async function openVcUsing({password='',keyfiles=[],button,statusPrefix='Lendo c
     }else{
       $('vc-status').textContent='Cabeçalho VeraCrypt aberto, mas o sistema de arquivos interno ainda não é suportado nesta versão.';
     }
+    return true;
   }catch(e){
     try{volume?.close?.();}catch{}
     resetVcOpenedState();
     $('vc-status').textContent=e.message||String(e);
     showToast(`Não foi possível abrir o container: ${e.message||e}`,'error');
+    return false;
   }finally{btn.disabled=false;btn.textContent=old;}
 }
 async function openVcContainer(){
