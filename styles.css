@@ -223,3 +223,8 @@ textarea { min-height:110px; resize:vertical; }
   .linked-profile-card .pill { flex:0 0 auto; }
   .linked-profile-card .actions .btn { min-width:0; }
 }
+
+/* v1.5 — ferramentas avançadas VeraCrypt */
+.helper-link { display:inline-flex; align-items:center; justify-content:center; text-decoration:none; }
+code { font: 600 .92em ui-monospace, SFMono-Regular, Menlo, monospace; color:#d9f6ea; }
+#vc-advanced-status, #vc-keygen-status { word-break:break-word; }

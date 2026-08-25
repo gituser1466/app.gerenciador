@@ -11,16 +11,16 @@
   <meta name="apple-mobile-web-app-title" content="Meu Cofre">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'self'; manifest-src 'self'; media-src 'none'">
   <title>Meu Cofre</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=1.4.0">
-  <link rel="icon" href="./icon-192.png?v=1.4.0" sizes="192x192">
-  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=1.4.0">
-  <link rel="stylesheet" href="./styles.css?v=1.4.0">
+  <link rel="manifest" href="./manifest.webmanifest?v=1.5.0">
+  <link rel="icon" href="./icon-192.png?v=1.5.0" sizes="192x192">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=1.5.0">
+  <link rel="stylesheet" href="./styles.css?v=1.5.0">
 </head>
 <body>
   <main class="shell">
     <div class="brand" id="public-brand">
       <div class="brand-mark">⌁</div>
-      <div><h1>Meu Cofre</h1><p>KDBX 4.1 + Vault VeraCrypt local e offline</p><small id="public-version" class="hint">v1.4.0</small></div>
+      <div><h1>Meu Cofre</h1><p>KDBX 4.1 + Vault VeraCrypt local e offline</p><small id="public-version" class="hint">v1.5.0</small></div>
     </div>
 
     <section id="screen-home" class="home-screen" hidden>
@@ -46,7 +46,7 @@
     <section id="screen-veracrypt" class="standalone-screen" hidden>
       <header class="standalone-topbar">
         <button type="button" class="btn ghost small" id="vc-home-btn">← Início</button>
-        <div class="standalone-title"><h2>Vault VeraCrypt</h2><small>Vaults vinculados · FIDO2 · recovery · leitura local</small></div>
+        <div class="standalone-title"><h2>Vault VeraCrypt</h2><small>Vaults vinculados · FIDO2 · recovery · headers · ferramentas macOS</small></div>
       </header>
       <div class="standalone-scroll" id="vc-standalone-scroll">
           <div class="section"><h3>Meus vaults VeraCrypt</h3>
@@ -131,9 +131,46 @@
           </div>
           <div id="vc-open-area" hidden>
             <div class="section"><h3>Volume aberto</h3><div class="card stack"><div id="vc-metadata" class="status-grid"></div><button class="btn danger" id="vc-close">Fechar e apagar chaves da memória</button></div></div>
-            <div class="section" id="vc-browser-section"><h3>Arquivos</h3><div class="card stack"><div class="vc-browser-head"><button class="btn ghost small" id="vc-back" hidden>Voltar</button><div id="vc-path" class="vc-path">Raiz</div></div><div id="vc-files" class="vc-files"></div><p class="hint">Modo somente leitura nesta versão. Ao tocar em um arquivo, uma cópia descriptografada é exportada pelo navegador.</p></div></div>
+            <div class="section" id="vc-browser-section"><h3>Arquivos</h3><div class="card stack"><div class="vc-browser-head"><button class="btn ghost small" id="vc-back" hidden>Voltar</button><div id="vc-path" class="vc-path">Raiz</div></div><div id="vc-files" class="vc-files"></div><p class="hint">Navegação local em modo leitura no iPhone. Para escrita completa e filesystems do macOS, use o helper oficial abaixo.</p></div></div>
           </div>
-          <div class="section"><div class="card"><p class="hint">Compatibilidade atual: containers de arquivo não-sistema, AES-256-XTS, PBKDF2-HMAC-SHA-512/SHA-256, PIM, keyfiles comuns, chave compartilhada via YubiKey FIDO2/PRF e FAT12/16/32/exFAT. Argon2id, Serpent/Twofish/Camellia/Kuznyechik, NTFS/HFS+/APFS e YubiKey PIV/PKCS#11 direto ainda não são suportados.</p></div></div>
+          <div class="section"><h3>Ferramentas de cabeçalho e credenciais</h3>
+            <div class="card stack">
+              <div class="security-note">Estas operações nunca alteram o arquivo original no navegador. O Meu Cofre gera uma nova cópia do container. Teste a nova cópia antes de excluir qualquer arquivo anterior.</div>
+              <details class="recovery-details"><summary>Alterar senha, PIM, KDF ou keyfiles</summary><div class="recovery-body stack">
+                <p class="hint">Use como credenciais atuais os campos da seção “senha/keyfiles tradicionais” acima. O cabeçalho primário e o backup embutido serão recriptografados; os dados do volume não são recriptografados.</p>
+                <label>Nova senha<input id="vc-new-password" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false"><span class="hint">Pode ficar vazia se o novo acesso for somente por keyfile.</span></label>
+                <label>Repetir nova senha<input id="vc-new-password2" type="password" autocomplete="new-password" autocapitalize="none" spellcheck="false"></label>
+                <div class="grid-2">
+                  <label>Novo PIM<input id="vc-new-pim" type="number" min="0" max="20000" value="0" inputmode="numeric"></label>
+                  <label>Novo KDF<select id="vc-new-kdf"><option value="same">Manter KDF atual</option><option value="SHA-512">PBKDF2 SHA-512</option><option value="SHA-256">PBKDF2 SHA-256</option></select></label>
+                </div>
+                <label>Keyfiles novos<select id="vc-new-keyfile-mode"><option value="keep">Manter os keyfiles atuais</option><option value="none">Remover todos os keyfiles</option><option value="replace">Substituir pelos arquivos abaixo</option></select></label>
+                <button class="btn ghost" id="vc-new-choose-keyfiles">Selecionar novos keyfile(s)</button>
+                <input type="file" id="vc-new-keyfiles" multiple hidden>
+                <div id="vc-new-keyfile-info" class="hint">Nenhum novo keyfile selecionado.</div>
+                <button class="btn" id="vc-change-credentials">Gerar cópia com novas credenciais</button>
+              </div></details>
+              <div class="actions"><button class="btn secondary" id="vc-header-backup">Exportar backup de headers</button><button class="btn secondary" id="vc-header-restore">Restaurar backup em uma cópia</button></div>
+              <input type="file" id="vc-header-restore-file" accept=".vcheader,application/octet-stream" hidden>
+              <button class="btn ghost" id="vc-repair-header">Reparar cabeçalho primário usando o backup embutido</button>
+              <div id="vc-advanced-status" class="hint"></div>
+            </div>
+          </div>
+          <div class="section"><h3>Gerador de keyfile</h3>
+            <div class="card stack">
+              <div class="grid-2"><label>Tamanho<select id="vc-keygen-size"><option value="64">64 bytes</option><option value="128">128 bytes</option><option value="256">256 bytes</option><option value="512">512 bytes</option><option value="1024">1024 bytes</option></select></label><div class="hint">Conteúdo gerado por <code>crypto.getRandomValues</code>. O arquivo é o segredo; o SHA-256 serve apenas para conferir cópias.</div></div>
+              <button class="btn secondary" id="vc-keygen">Gerar e baixar keyfile</button>
+              <div id="vc-keygen-status" class="hint"></div>
+            </div>
+          </div>
+          <div class="section"><h3>VeraCrypt oficial no macOS</h3>
+            <div class="card stack">
+              <div class="security-note">Para criação de volumes, escrita normal, APFS/HFS+/exFAT, Argon2id, demais hashes/cifradores, hidden volumes, tokens e operações de montagem, o Meu Cofre fornece um helper que chama o VeraCrypt oficial instalado no Mac. Senhas continuam sendo solicitadas interativamente pelo VeraCrypt, não pela linha de comando.</div>
+              <a class="btn secondary helper-link" href="./MeuCofre-VeraCrypt-macOS.command" download>Baixar helper VeraCrypt para macOS</a>
+              <p class="hint">No Finder, depois do download: botão direito → Abrir. Se o macOS bloquear o arquivo baixado, revise-o antes e autorize manualmente. O helper não contém credenciais.</p>
+            </div>
+          </div>
+          <div class="section"><div class="card"><p class="hint">Leitor local do iPhone: containers não-sistema AES-256-XTS, PBKDF2-HMAC-SHA-512/SHA-256, PIM, keyfiles, YubiKey FIDO2/PRF e FAT12/16/32/exFAT. A v1.5 acrescenta troca de credenciais, backup/restauração e reparo de headers sem modificar o original. Argon2id, outras cifras/hashes, APFS/HFS+/NTFS, escrita geral e montagem de filesystem ficam a cargo do VeraCrypt oficial no macOS por segurança e compatibilidade.</p></div></div>
       </div>
     </section>
 
@@ -215,7 +252,7 @@
         <section class="view" data-view="settings">
           <div class="section"><h3>Bloqueio automático</h3><div class="card stack"><label>Por inatividade (minutos)<input id="setting-idle" type="number" min="1" max="120"></label><label>Ao deixar o app em segundo plano (segundos)<input id="setting-background" type="number" min="0" max="300"></label><label>Limpar área de transferência após (segundos)<input id="setting-clipboard" type="number" min="0" max="300"></label><button class="btn secondary" id="save-settings">Salvar configurações</button></div></div>
           <div class="section"><h3>Armazenamento</h3><div class="card stack"><button class="btn secondary" id="request-persistent">Solicitar armazenamento persistente</button><div id="persistent-status" class="hint"></div></div></div>
-          <div class="section"><h3>Sobre</h3><div class="card stack"><div class="row"><div class="row-main"><div class="row-title">Meu Cofre</div><div class="row-sub">1.4.0 · vaults VeraCrypt vinculados + 2 YubiKeys + recovery + KDBX</div></div></div><div class="security-note">Sem telemetria, sem CDN e sem servidor de senhas. A hospedagem entrega apenas o código. Um comprometimento da origem web ainda é um risco estrutural de qualquer PWA; proteja sua conta GitHub e o repositório com autenticação forte.</div></div></div>
+          <div class="section"><h3>Sobre</h3><div class="card stack"><div class="row"><div class="row-main"><div class="row-title">Meu Cofre</div><div class="row-sub">1.5.0 · VeraCrypt avançado + 2 YubiKeys + recovery + KDBX</div></div></div><div class="security-note">Sem telemetria, sem CDN e sem servidor de senhas. A hospedagem entrega apenas o código. Um comprometimento da origem web ainda é um risco estrutural de qualquer PWA; proteja sua conta GitHub e o repositório com autenticação forte.</div></div></div>
         </section>
       </div>
       <nav class="bottom-nav" aria-label="Navegação"><button class="nav-btn active" data-nav="vault"><span>⌂</span>Cofre</button><button class="nav-btn" data-nav="generator"><span>✦</span>Gerador</button><button class="nav-btn" id="open-veracrypt-from-app"><span>◇</span>Volumes</button><button class="nav-btn" data-nav="security"><span>⌾</span>Segurança</button><button class="nav-btn" data-nav="settings"><span>⚙</span>Ajustes</button></nav>
@@ -226,6 +263,6 @@
 
   <div id="toast" class="toast" hidden></div>
   <div id="update-banner" class="update-banner" hidden><strong>Atualização disponível</strong><div class="hint">A nova versão só será ativada quando você confirmar.</div><div class="actions"><button class="btn small" id="apply-update">Atualizar agora</button><button class="btn ghost small" id="dismiss-update">Depois</button></div></div>
-  <script type="module" src="./app.js?v=1.4.0"></script>
+  <script type="module" src="./app.js?v=1.5.0"></script>
 </body>
 </html>

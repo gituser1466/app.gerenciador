@@ -1,6 +1,6 @@
 {
   "id":"./","name":"Meu Cofre","short_name":"Meu Cofre",
-  "description":"Gerenciador local e offline com KDBX 4.1 e vaults VeraCrypt vinculados, com YubiKey FIDO2/WebAuthn PRF e recuperação por senha.",
+  "description":"Gerenciador local/offline com KDBX 4.1, vaults VeraCrypt vinculados, YubiKey FIDO2 e ferramentas avançadas de headers/credenciais.",
   "lang":"pt-BR","start_url":"./","scope":"./","display":"standalone",
   "background_color":"#090b10","theme_color":"#090b10","categories":["security","utilities"],
   "icons":[

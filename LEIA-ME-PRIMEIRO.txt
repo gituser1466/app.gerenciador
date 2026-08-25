@@ -1,14 +1,15 @@
-MEU COFRE 1.4.0 - KDBX + VAULT VERACRYPT VINCULADO
+MEU COFRE 1.5.0 - KDBX + VERACRYPT AVANCADO
 
-Envie TODOS os arquivos desta pasta para a raiz do mesmo repositorio GitHub Pages.
+Envie TODOS os arquivos desta pasta para a raiz do MESMO repositorio GitHub Pages.
 Nao envie o ZIP. Nao mude o dominio/origem se ja cadastrou YubiKeys WebAuthn.
 
-NOVIDADE 1.4.0
-- Vincular um container VeraCrypt ja existente no Mac.
-- Guardar senha/PIM/keyfiles somente dentro de pacote cifrado.
-- Duas ou mais YubiKeys FIDO2 independentes liberam o mesmo perfil.
-- Recovery por senha.
-- Exportar/importar perfil .vcprofile.
-- Testar cada YubiKey e o recovery antes de depender do fluxo.
+NOVIDADES 1.5.0
+- Alterar senha, PIM, KDF PBKDF2 e keyfiles em uma NOVA COPIA do container.
+- Backup .vcheader das areas de header, com verificacao de integridade.
+- Restaurar headers e reparar o primary a partir do backup embutido.
+- Gerador de keyfile aleatorio.
+- Companion MeuCofre-VeraCrypt-macOS.command para chamar as funcoes do VeraCrypt oficial no Mac.
+- Mantidos: KDBX, vault vinculado, 2+ YubiKeys FIDO2, recovery e .vcprofile.
 
-Antes de atualizar, exporte seu KDBX e qualquer .vcprofile importante.
+Antes de atualizar, exporte seu KDBX, .vcprofile e mantenha backup do container.
+Nao substitua um container real por uma copia alterada antes de testar as credenciais e a recuperacao.

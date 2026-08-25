@@ -1,4 +1,4 @@
-import { wipe } from './utils.js';
+import { concatBytes, randomBytes, wipe } from './utils.js';
 
 // VeraCrypt-compatible file-container reader.
 // Scope intentionally narrow for safety and portability in a PWA:
@@ -159,11 +159,22 @@ function parseDecryptedHeader(dec,fileSize,hash,pim,headerOffset){
   let same=true;for(let i=0;i<32;i++)if(primary[i]!==secondary[i]){same=false;break;}if(same){wipe(primary);wipe(secondary);throw new Error('Volume rejeitado: chaves XTS primária e secundária são idênticas.');}
   return {cipher:'AES-256-XTS',hash,pim,iterations:pim>0?15000+pim*1000:500000,headerVersion,requiredVersion,hiddenVolumeSize,volumeSize,encryptedAreaStart,encryptedAreaLength,flags,sectorSize,headerOffset,primaryKey:primary,secondaryKey:secondary};
 }
-async function tryHeader(file,passwordBytes,{pim=0,hash='SHA-512',offset=0,source='primário'}={}){
+async function readHeaderMaterial(file,passwordBytes,{pim=0,hash='SHA-512',offset=0,source='primário'}={}){
   if(offset<0||file.size<offset+HEADER_SIZE)return null;
   const raw=new Uint8Array(await file.slice(offset,offset+HEADER_SIZE).arrayBuffer()), salt=raw.slice(0,SALT_SIZE); let hk=null,dec=null;
-  try{ hk=await deriveHeaderKey(passwordBytes,salt,pim,hash); dec=aesXtsTransform(raw.subarray(SALT_SIZE),hk.subarray(0,32),hk.subarray(32,64),0,true,0); const info=parseDecryptedHeader(dec,file.size,hash,pim,offset);if(info)info.headerSource=source;return info; }
-  finally{wipe(raw);wipe(salt);hk&&wipe(hk);dec&&wipe(dec);}
+  try{
+    hk=await deriveHeaderKey(passwordBytes,salt,pim,hash);
+    dec=aesXtsTransform(raw.subarray(SALT_SIZE),hk.subarray(0,32),hk.subarray(32,64),0,true,0);
+    const info=parseDecryptedHeader(dec,file.size,hash,pim,offset);
+    if(!info)return null;
+    info.headerSource=source;
+    return {info,decryptedHeader:dec.slice()};
+  } finally { wipe(raw);wipe(salt);hk&&wipe(hk);dec&&wipe(dec); }
+}
+async function tryHeader(file,passwordBytes,opts={}){
+  const material=await readHeaderMaterial(file,passwordBytes,opts);
+  if(!material)return null;
+  try{return material.info;}finally{wipe(material.decryptedHeader);}
 }
 
 export async function openVeraCryptFile(file,{password='',pim=0,keyfiles=[],hash='auto',hidden=false}={}){
@@ -181,6 +192,88 @@ export async function openVeraCryptFile(file,{password='',pim=0,keyfiles=[],hash
     if(!info)throw new Error('Não foi possível abrir o cabeçalho primário nem o backup embutido. Verifique senha, PIM, keyfiles, volume normal/oculto e KDF. Esta versão suporta AES-XTS com PBKDF2 SHA-512/SHA-256.');
     info.hidden=!!hidden;return new VeraCryptVolume(file,info);
   } finally {wipe(pass);}
+}
+
+function supportedHashList(hash){
+  const value=String(hash||'auto');
+  if(value==='auto')return ['SHA-512','SHA-256'];
+  if(!['SHA-512','SHA-256'].includes(value))throw new Error('KDF não suportado para alteração local. Use SHA-512 ou SHA-256.');
+  return [value];
+}
+function headerOffsets(fileSize,hidden){
+  return hidden
+    ? {primary:HIDDEN_HEADER_OFFSET,backup:fileSize-HIDDEN_HEADER_OFFSET}
+    : {primary:0,backup:fileSize-(2*HIDDEN_HEADER_OFFSET)};
+}
+async function findHeaderMaterial(file,passwordBytes,{pim=0,hash='auto',hidden=false,source='any'}={}){
+  const offsets=headerOffsets(file.size,!!hidden);
+  const candidates=source==='backup'
+    ? [{offset:offsets.backup,label:'backup embutido'}]
+    : source==='primary'
+      ? [{offset:offsets.primary,label:'primário'}]
+      : [{offset:offsets.primary,label:'primário'},{offset:offsets.backup,label:'backup embutido'}];
+  for(const candidate of candidates){
+    for(const h of supportedHashList(hash)){
+      const material=await readHeaderMaterial(file,passwordBytes,{pim,hash:h,offset:candidate.offset,source:candidate.label});
+      if(material){material.info.hidden=!!hidden;return material;}
+    }
+  }
+  return null;
+}
+async function encryptHeaderMaterial(decryptedHeader,passwordBytes,{pim=0,hash='SHA-512'}={}){
+  if(!(decryptedHeader instanceof Uint8Array)||decryptedHeader.length!==ENCRYPTED_HEADER_SIZE)throw new Error('Cabeçalho descriptografado inválido.');
+  if(!['SHA-512','SHA-256'].includes(hash))throw new Error('KDF de destino não suportado.');
+  const salt=randomBytes(SALT_SIZE);let hk=null,enc=null;
+  try{
+    hk=await deriveHeaderKey(passwordBytes,salt,pim,hash);
+    enc=aesXtsTransform(decryptedHeader,hk.subarray(0,32),hk.subarray(32,64),0,false,0);
+    return concatBytes(salt,enc);
+  } finally { wipe(salt);hk&&wipe(hk);enc&&wipe(enc); }
+}
+function patchedBlob(file,patches){
+  const sorted=[...patches].sort((a,b)=>a.offset-b.offset);
+  const parts=[];let cursor=0;
+  for(const patch of sorted){
+    if(!Number.isSafeInteger(patch.offset)||patch.offset<cursor||patch.offset+patch.bytes.length>file.size)throw new Error('Patch de cabeçalho fora dos limites.');
+    if(patch.offset>cursor)parts.push(file.slice(cursor,patch.offset));
+    parts.push(patch.bytes.slice());cursor=patch.offset+patch.bytes.length;
+  }
+  if(cursor<file.size)parts.push(file.slice(cursor));
+  return new Blob(parts,{type:'application/octet-stream'});
+}
+
+export async function reencryptVeraCryptHeaders(file,current={},next={}){
+  if(!file||typeof file.slice!=='function')throw new Error('Selecione um container VeraCrypt.');
+  const currentPim=Number.parseInt(String(current.pim||0),10)||0;
+  const nextPim=Number.parseInt(String(next.pim??currentPim),10)||0;
+  if(currentPim<0||currentPim>MAX_PIM||nextPim<0||nextPim>MAX_PIM)throw new Error('PIM inválido.');
+  const currentPass=await applyKeyfiles(current.password||'',current.keyfiles||[]);let nextPass=null,material=null,primary=null,backup=null;
+  try{
+    material=await findHeaderMaterial(file,currentPass,{pim:currentPim,hash:current.hash||'auto',hidden:!!current.hidden,source:'any'});
+    if(!material)throw new Error('Credenciais atuais não abriram o cabeçalho VeraCrypt.');
+    const targetHash=(next.hash==='same'||!next.hash||next.hash==='auto')?material.info.hash:next.hash;
+    nextPass=await applyKeyfiles(next.password??current.password??'',next.keyfiles??current.keyfiles??[]);
+    primary=await encryptHeaderMaterial(material.decryptedHeader,nextPass,{pim:nextPim,hash:targetHash});
+    backup=await encryptHeaderMaterial(material.decryptedHeader,nextPass,{pim:nextPim,hash:targetHash});
+    const offsets=headerOffsets(file.size,!!current.hidden);
+    const blob=patchedBlob(file,[{offset:offsets.primary,bytes:primary},{offset:offsets.backup,bytes:backup}]);
+    return {blob,info:{...material.info,hash:targetHash,pim:nextPim,iterations:nextPim>0?15000+nextPim*1000:500000,headerSource:'novo primário'}};
+  } finally {
+    wipe(currentPass);nextPass&&wipe(nextPass);material?.decryptedHeader&&wipe(material.decryptedHeader);primary&&wipe(primary);backup&&wipe(backup);
+  }
+}
+
+export async function repairVeraCryptPrimaryHeader(file,credentials={}){
+  if(!file||typeof file.slice!=='function')throw new Error('Selecione um container VeraCrypt.');
+  const pim=Number.parseInt(String(credentials.pim||0),10)||0;if(pim<0||pim>MAX_PIM)throw new Error('PIM inválido.');
+  const pass=await applyKeyfiles(credentials.password||'',credentials.keyfiles||[]);let material=null,fresh=null;
+  try{
+    material=await findHeaderMaterial(file,pass,{pim,hash:credentials.hash||'auto',hidden:!!credentials.hidden,source:'backup'});
+    if(!material)throw new Error('O backup embutido não pôde ser aberto com as credenciais informadas.');
+    fresh=await encryptHeaderMaterial(material.decryptedHeader,pass,{pim,hash:material.info.hash});
+    const offsets=headerOffsets(file.size,!!credentials.hidden);
+    return {blob:patchedBlob(file,[{offset:offsets.primary,bytes:fresh}]),info:{...material.info,headerSource:'primário reparado'}};
+  } finally { wipe(pass);material?.decryptedHeader&&wipe(material.decryptedHeader);fresh&&wipe(fresh); }
 }
 
 export class VeraCryptVolume{

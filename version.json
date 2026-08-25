@@ -1,1 +1,1 @@
-{"version":"1.4.0","channel":"candidate","released":"2026-08-24","format":"KDBX 4.1","veracrypt":"linked existing vaults + 2 YubiKeys FIDO2 + password recovery + read-only browser"}
+{"version":"1.5.0","channel":"candidate","released":"2026-08-25","format":"KDBX 4.1","veracrypt":"linked vaults + FIDO2 + header credential tools + macOS official companion"}

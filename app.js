@@ -31,13 +31,14 @@ import {
 import { evaluatePrf, platformAuthenticatorAvailable, registerPrfCredential } from './webauthn.js';
 import { generatePassword } from './generator.js';
 import { totp } from './totp.js';
-import { openVeraCryptFile } from './veracrypt.js';
+import { openVeraCryptFile, reencryptVeraCryptHeaders, repairVeraCryptPrimaryHeader } from './veracrypt.js';
+import { createVeraCryptHeaderBackup, generateVeraCryptKeyfile, keyfileSha256, restoreVeraCryptHeaderBackup } from './veracrypt-advanced.js';
 import { openSupportedFileSystem } from './filesystem.js';
 import { addSlot as addVeraCryptFidoSlot, createProfile as createVeraCryptFidoProfile, openRecoveryVault as openVeraCryptRecoveryVault, rawKeyfileBlob, recoveryFromFile, recoveryToBlob, unwrapSecretFromSlot, validateProfile as validateVeraCryptFidoProfile, wrapSecretForRegistration } from './veracrypt-fido.js';
 import { addLinkedProfileSlot, buildCredentialBundle, changeRecoveryPassword as changeLinkedRecoveryPassword, createLinkedProfile, decryptBundle as decryptLinkedBundle, materializeBundleCredentials, profileFromFile as linkedProfileFromFile, profileToBlob as linkedProfileToBlob, removeLinkedProfileSlot, unwrapDekFromRecovery as unwrapLinkedDekFromRecovery, unwrapDekFromSlot as unwrapLinkedDekFromSlot, validateLinkedProfile, verifyContainerAgainstProfile, wipeMaterializedCredentials } from './veracrypt-linked.js';
 import { base64ToBytes, bytesToBase64, clampInt, downloadBlob, formatDateTime, safeHttpUrl, uuid, wipe } from './utils.js';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 const $ = (id) => document.getElementById(id);
 let record = null;
 let session = null;
@@ -50,6 +51,7 @@ let clipboardTimer = null;
 let waitingWorker = null;
 let vcSelectedFile = null;
 let vcKeyfiles = [];
+let vcNewKeyfiles = [];
 let vcVolume = null;
 let vcFs = null;
 let vcPath = [];
@@ -169,6 +171,14 @@ function bindEvents() {
   $('vc-fido-recovery-file').addEventListener('change', e => importVcRecovery(e.target.files?.[0]));
   $('vc-fido-restore-profile').addEventListener('click', restoreVcFidoProfileFromRecovery);
   $('vc-fido-reset').addEventListener('click', resetVcFidoConfiguration);
+  $('vc-new-choose-keyfiles').addEventListener('click', () => $('vc-new-keyfiles').click());
+  $('vc-new-keyfiles').addEventListener('change', e => selectVcNewKeyfiles([...(e.target.files || [])]));
+  $('vc-change-credentials').addEventListener('click', changeVcCredentials);
+  $('vc-header-backup').addEventListener('click', exportVcHeaderBackup);
+  $('vc-header-restore').addEventListener('click', () => $('vc-header-restore-file').click());
+  $('vc-header-restore-file').addEventListener('change', e => restoreVcHeadersFromFile(e.target.files?.[0] || null));
+  $('vc-repair-header').addEventListener('click', repairVcHeader);
+  $('vc-keygen').addEventListener('click', generateVcKeyfile);
   $('add-yubikey').addEventListener('click', () => addWebAuthnMethod('security-key'));
   $('add-passkey').addEventListener('click', () => addWebAuthnMethod('platform'));
   $('export-recovery-key').addEventListener('click', exportRecoveryKey);
@@ -605,12 +615,98 @@ function selectVcKeyfiles(files){
   vcKeyfiles=files.slice(0,32);
   $('vc-keyfile-info').textContent=vcKeyfiles.length?`${vcKeyfiles.length} keyfile(s): ${vcKeyfiles.map(f=>f.name).join(', ')}`:'Sem keyfiles.';
 }
+function selectVcNewKeyfiles(files){
+  vcNewKeyfiles=files.slice(0,32);
+  $('vc-new-keyfile-info').textContent=vcNewKeyfiles.length?`${vcNewKeyfiles.length} novo(s) keyfile(s): ${vcNewKeyfiles.map(f=>f.name).join(', ')}`:'Nenhum novo keyfile selecionado.';
+  if(vcNewKeyfiles.length)$('vc-new-keyfile-mode').value='replace';
+}
+function vcCurrentCredentials(){
+  return {
+    password:$('vc-password').value,
+    pim:$('vc-pim').value,
+    hash:$('vc-kdf').value,
+    hidden:$('vc-volume-type').value==='hidden',
+    keyfiles:vcKeyfiles
+  };
+}
+function vcOutputName(file,suffix,forcedExt=null){
+  const raw=(file?.name||'vault.hc').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').slice(0,180)||'vault.hc';
+  const dot=raw.lastIndexOf('.');
+  const base=dot>0?raw.slice(0,dot):raw;
+  const ext=forcedExt??(dot>0?raw.slice(dot):'.hc');
+  return `${base}-${suffix}${ext}`;
+}
+async function changeVcCredentials(){
+  if(!vcSelectedFile)return showToast('Selecione o container na seção de senha/keyfiles tradicionais.','error');
+  const btn=$('vc-change-credentials'),old=btn.textContent;let result=null,test=null;
+  try{
+    const newPassword=$('vc-new-password').value,newPassword2=$('vc-new-password2').value;
+    if(newPassword!==newPassword2)throw new Error('As novas senhas não coincidem.');
+    const mode=$('vc-new-keyfile-mode').value;
+    let nextKeyfiles;
+    if(mode==='keep')nextKeyfiles=vcKeyfiles;
+    else if(mode==='none')nextKeyfiles=[];
+    else {if(!vcNewKeyfiles.length)throw new Error('Selecione os novos keyfiles ou escolha outro modo.');nextKeyfiles=vcNewKeyfiles;}
+    const current=vcCurrentCredentials();
+    const next={password:newPassword,pim:$('vc-new-pim').value,hash:$('vc-new-kdf').value,keyfiles:nextKeyfiles};
+    if(!newPassword && !nextKeyfiles.length)throw new Error('Por segurança, a nova configuração precisa ter uma senha e/ou pelo menos um keyfile.');
+    if(!confirm('Será criada uma NOVA CÓPIA do container com os headers recriptografados. O original permanecerá intacto. Continuar?'))return;
+    btn.disabled=true;btn.textContent='Recriptografando headers...';$('vc-advanced-status').textContent='Validando credenciais atuais e gerando dois novos salts independentes...';
+    result=await reencryptVeraCryptHeaders(vcSelectedFile,current,next);
+    test=await openVeraCryptFile(result.blob,{password:newPassword,pim:next.pim,hash:next.hash==='same'?'auto':next.hash,hidden:current.hidden,keyfiles:nextKeyfiles});
+    test.close();test=null;
+    const name=vcOutputName(vcSelectedFile,'novas-credenciais');
+    downloadBlob(result.blob,name);
+    $('vc-advanced-status').textContent=`Cópia validada e exportada: ${name}. Teste-a no VeraCrypt oficial antes de excluir o original.`;
+    $('vc-new-password').value='';$('vc-new-password2').value='';vcNewKeyfiles=[];$('vc-new-keyfiles').value='';$('vc-new-keyfile-info').textContent='Nenhum novo keyfile selecionado.';
+    showToast('Nova cópia VeraCrypt validada e exportada.','success');
+  }catch(e){try{test?.close?.();}catch{}$('vc-advanced-status').textContent=e.message||String(e);showToast(e.message||String(e),'error');}
+  finally{btn.disabled=false;btn.textContent=old;}
+}
+async function exportVcHeaderBackup(){
+  if(!vcSelectedFile)return showToast('Selecione primeiro o container VeraCrypt.','error');
+  const btn=$('vc-header-backup'),old=btn.textContent;
+  try{btn.disabled=true;btn.textContent='Lendo headers...';const blob=await createVeraCryptHeaderBackup(vcSelectedFile);const name=vcOutputName(vcSelectedFile,'headers','.vcheader');downloadBlob(blob,name);$('vc-advanced-status').textContent=`Backup de 256 KiB das áreas de header exportado: ${name}. Ele pode restaurar credenciais antigas; trate-o como backup sensível.`;showToast('Backup de headers exportado.','success');}
+  catch(e){$('vc-advanced-status').textContent=e.message||String(e);showToast(e.message||String(e),'error');}
+  finally{btn.disabled=false;btn.textContent=old;}
+}
+async function restoreVcHeadersFromFile(backupFile){
+  if(!backupFile)return;
+  try{
+    if(!vcSelectedFile)throw new Error('Selecione primeiro o container que receberá a restauração.');
+    if(!confirm('Restaurar headers pode restaurar senhas, PIM e keyfiles antigos. O Meu Cofre criará uma NOVA CÓPIA; o original não será alterado. Continuar?'))return;
+    $('vc-advanced-status').textContent='Validando integridade e tamanho do backup...';
+    const blob=await restoreVeraCryptHeaderBackup(vcSelectedFile,backupFile);const name=vcOutputName(vcSelectedFile,'headers-restaurados');downloadBlob(blob,name);
+    $('vc-advanced-status').textContent=`Cópia com headers restaurados exportada: ${name}. Use as credenciais válidas na data do backup.`;showToast('Headers restaurados em uma nova cópia.','success');
+  }catch(e){$('vc-advanced-status').textContent=e.message||String(e);showToast(e.message||String(e),'error');}
+  finally{$('vc-header-restore-file').value='';}
+}
+async function repairVcHeader(){
+  if(!vcSelectedFile)return showToast('Selecione primeiro o container VeraCrypt.','error');
+  const btn=$('vc-repair-header'),old=btn.textContent;let result=null,test=null;
+  try{
+    if(!confirm('O backup embutido será usado para gerar um novo cabeçalho primário em uma NOVA CÓPIA. O original não será alterado. Continuar?'))return;
+    btn.disabled=true;btn.textContent='Reparando...';const current=vcCurrentCredentials();
+    result=await repairVeraCryptPrimaryHeader(vcSelectedFile,current);
+    test=await openVeraCryptFile(result.blob,current);if(test.info.headerSource!=='primário')throw new Error('A validação da cópia reparada não usou o cabeçalho primário.');test.close();test=null;
+    const name=vcOutputName(vcSelectedFile,'header-reparado');downloadBlob(result.blob,name);$('vc-advanced-status').textContent=`Cabeçalho primário reconstruído e validado: ${name}.`;showToast('Cópia com cabeçalho reparado exportada.','success');
+  }catch(e){try{test?.close?.();}catch{}$('vc-advanced-status').textContent=e.message||String(e);showToast(e.message||String(e),'error');}
+  finally{btn.disabled=false;btn.textContent=old;}
+}
+async function generateVcKeyfile(){
+  const btn=$('vc-keygen'),old=btn.textContent;let bytes=null;
+  try{btn.disabled=true;btn.textContent='Gerando...';bytes=generateVeraCryptKeyfile(Number($('vc-keygen-size').value));const fingerprint=await keyfileSha256(bytes);const blob=new Blob([bytes.slice()],{type:'application/octet-stream'});const name=`MeuCofre-keyfile-${bytes.length}B-${new Date().toISOString().slice(0,10)}.key`;downloadBlob(blob,name);$('vc-keygen-status').textContent=`${name} · SHA-256 ${fingerprint}. Guarde o arquivo como segredo; o hash serve apenas para conferência.`;showToast('Keyfile aleatório gerado.','success');}
+  catch(e){$('vc-keygen-status').textContent=e.message||String(e);showToast(e.message||String(e),'error');}
+  finally{bytes&&wipe(bytes);btn.disabled=false;btn.textContent=old;}
+}
 function closeVeraCryptSession(resetSelection=false){
   resetVcOpenedState();
   if($('vc-password'))$('vc-password').value='';
   if($('vc-status'))$('vc-status').textContent='';
-  vcKeyfiles=[];
+  vcKeyfiles=[];vcNewKeyfiles=[];
   if($('vc-keyfiles'))$('vc-keyfiles').value='';
+  if($('vc-new-keyfiles'))$('vc-new-keyfiles').value='';
+  if($('vc-new-keyfile-info'))$('vc-new-keyfile-info').textContent='Nenhum novo keyfile selecionado.';
   if($('vc-keyfile-info'))$('vc-keyfile-info').textContent='Sem keyfiles.';
   if(resetSelection){
     vcSelectedFile=null;
