@@ -11,16 +11,16 @@
   <meta name="apple-mobile-web-app-title" content="Meu Cofre">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'self'; manifest-src 'self'; media-src 'none'">
   <title>Meu Cofre</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=1.5.0">
-  <link rel="icon" href="./icon-192.png?v=1.5.0" sizes="192x192">
-  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=1.5.0">
-  <link rel="stylesheet" href="./styles.css?v=1.5.0">
+  <link rel="manifest" href="./manifest.webmanifest?v=1.6.0">
+  <link rel="icon" href="./icon-192.png?v=1.6.0" sizes="192x192">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=1.6.0">
+  <link rel="stylesheet" href="./styles.css?v=1.6.0">
 </head>
 <body>
   <main class="shell">
     <div class="brand" id="public-brand">
       <div class="brand-mark">⌁</div>
-      <div><h1>Meu Cofre</h1><p>KDBX 4.1 + Vault VeraCrypt local e offline</p><small id="public-version" class="hint">v1.5.0</small></div>
+      <div><h1>Meu Cofre</h1><p>KDBX 4.1 + Vault VeraCrypt local e offline</p><small id="public-version" class="hint">v1.6.0</small></div>
     </div>
 
     <section id="screen-home" class="home-screen" hidden>
@@ -163,14 +163,18 @@
               <div id="vc-keygen-status" class="hint"></div>
             </div>
           </div>
-          <div class="section"><h3>VeraCrypt oficial no macOS</h3>
+          <div class="section"><h3>VeraCrypt oficial no macOS — montagem por YubiKey</h3>
             <div class="card stack">
-              <div class="security-note">Para criação de volumes, escrita normal, APFS/HFS+/exFAT, Argon2id, demais hashes/cifradores, hidden volumes, tokens e operações de montagem, o Meu Cofre fornece um helper que chama o VeraCrypt oficial instalado no Mac. Senhas continuam sendo solicitadas interativamente pelo VeraCrypt, não pela linha de comando.</div>
-              <a class="btn secondary helper-link" href="./MeuCofre-VeraCrypt-macOS.command" download>Baixar helper VeraCrypt para macOS</a>
-              <p class="hint">No Finder, depois do download: botão direito → Abrir. Se o macOS bloquear o arquivo baixado, revise-o antes e autorize manualmente. O helper não contém credenciais.</p>
+              <div class="security-note">A v1.6 integra o vault vinculado ao VeraCrypt oficial. A YubiKey libera senha/PIM/keyfiles no navegador, que são colocados em um pacote temporário cifrado para a chave pública do seu Mac. O helper local descriptografa esse pacote, cria os keyfiles somente em RAM e envia a senha ao VeraCrypt por <code>--stdin</code>; a senha não é passada na linha de comando.</div>
+              <a class="btn secondary helper-link" href="./MeuCofre-VeraCrypt-macOS.command" download>1. Instalar/atualizar helper macOS</a>
+              <button class="btn secondary" id="vc-mac-pair">2. Importar pareamento .mcpair</button>
+              <input type="file" id="vc-mac-pair-file" accept=".mcpair,.pem,text/plain,application/json" hidden>
+              <div id="vc-mac-pairing-status" class="hint">Helper ainda não pareado.</div>
+              <button class="btn ghost" id="vc-mac-unpair" disabled>Remover pareamento deste navegador</button>
+              <p class="hint">Na primeira execução do helper: botão direito → Abrir. Ele instala “MeuCofre VeraCrypt Helper.app” em <code>~/Applications</code>, cria uma chave RSA-4096 local e grava em Downloads apenas a chave pública <code>MeuCofre-VeraCrypt-macOS.mcpair</code>. Importe esse arquivo acima. Depois use “Montar no VeraCrypt (Mac)” no cartão do vault.</p>
             </div>
           </div>
-          <div class="section"><div class="card"><p class="hint">Leitor local do iPhone: containers não-sistema AES-256-XTS, PBKDF2-HMAC-SHA-512/SHA-256, PIM, keyfiles, YubiKey FIDO2/PRF e FAT12/16/32/exFAT. A v1.5 acrescenta troca de credenciais, backup/restauração e reparo de headers sem modificar o original. Argon2id, outras cifras/hashes, APFS/HFS+/NTFS, escrita geral e montagem de filesystem ficam a cargo do VeraCrypt oficial no macOS por segurança e compatibilidade.</p></div></div>
+          <div class="section"><div class="card"><p class="hint">No iPhone o leitor interno continua limitado aos formatos já suportados. No Mac, a montagem FIDO2 passa a ser feita pelo VeraCrypt oficial, com leitura e escrita normais no Finder. O helper só aceita pacotes autenticados, com validade curta, e verifica tamanho + fingerprint do header antes de montar o container.</p></div></div>
       </div>
     </section>
 
@@ -252,7 +256,7 @@
         <section class="view" data-view="settings">
           <div class="section"><h3>Bloqueio automático</h3><div class="card stack"><label>Por inatividade (minutos)<input id="setting-idle" type="number" min="1" max="120"></label><label>Ao deixar o app em segundo plano (segundos)<input id="setting-background" type="number" min="0" max="300"></label><label>Limpar área de transferência após (segundos)<input id="setting-clipboard" type="number" min="0" max="300"></label><button class="btn secondary" id="save-settings">Salvar configurações</button></div></div>
           <div class="section"><h3>Armazenamento</h3><div class="card stack"><button class="btn secondary" id="request-persistent">Solicitar armazenamento persistente</button><div id="persistent-status" class="hint"></div></div></div>
-          <div class="section"><h3>Sobre</h3><div class="card stack"><div class="row"><div class="row-main"><div class="row-title">Meu Cofre</div><div class="row-sub">1.5.0 · VeraCrypt avançado + 2 YubiKeys + recovery + KDBX</div></div></div><div class="security-note">Sem telemetria, sem CDN e sem servidor de senhas. A hospedagem entrega apenas o código. Um comprometimento da origem web ainda é um risco estrutural de qualquer PWA; proteja sua conta GitHub e o repositório com autenticação forte.</div></div></div>
+          <div class="section"><h3>Sobre</h3><div class="card stack"><div class="row"><div class="row-main"><div class="row-title">Meu Cofre</div><div class="row-sub">1.6.0 · VeraCrypt nativo no Mac + 2 YubiKeys + recovery + KDBX</div></div></div><div class="security-note">Sem telemetria, sem CDN e sem servidor de senhas. A hospedagem entrega apenas o código. Um comprometimento da origem web ainda é um risco estrutural de qualquer PWA; proteja sua conta GitHub e o repositório com autenticação forte.</div></div></div>
         </section>
       </div>
       <nav class="bottom-nav" aria-label="Navegação"><button class="nav-btn active" data-nav="vault"><span>⌂</span>Cofre</button><button class="nav-btn" data-nav="generator"><span>✦</span>Gerador</button><button class="nav-btn" id="open-veracrypt-from-app"><span>◇</span>Volumes</button><button class="nav-btn" data-nav="security"><span>⌾</span>Segurança</button><button class="nav-btn" data-nav="settings"><span>⚙</span>Ajustes</button></nav>
@@ -263,6 +267,6 @@
 
   <div id="toast" class="toast" hidden></div>
   <div id="update-banner" class="update-banner" hidden><strong>Atualização disponível</strong><div class="hint">A nova versão só será ativada quando você confirmar.</div><div class="actions"><button class="btn small" id="apply-update">Atualizar agora</button><button class="btn ghost small" id="dismiss-update">Depois</button></div></div>
-  <script type="module" src="./app.js?v=1.5.0"></script>
+  <script type="module" src="./app.js?v=1.6.0"></script>
 </body>
 </html>

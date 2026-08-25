@@ -1,15 +1,15 @@
-MEU COFRE 1.5.0 - KDBX + VERACRYPT AVANCADO
+MEU COFRE 1.6.0 - KDBX + VERACRYPT + FIDO2 NO VERACRYPT OFICIAL DO MAC
 
 Envie TODOS os arquivos desta pasta para a raiz do MESMO repositorio GitHub Pages.
 Nao envie o ZIP. Nao mude o dominio/origem se ja cadastrou YubiKeys WebAuthn.
 
-NOVIDADES 1.5.0
-- Alterar senha, PIM, KDF PBKDF2 e keyfiles em uma NOVA COPIA do container.
-- Backup .vcheader das areas de header, com verificacao de integridade.
-- Restaurar headers e reparar o primary a partir do backup embutido.
-- Gerador de keyfile aleatorio.
-- Companion MeuCofre-VeraCrypt-macOS.command para chamar as funcoes do VeraCrypt oficial no Mac.
-- Mantidos: KDBX, vault vinculado, 2+ YubiKeys FIDO2, recovery e .vcprofile.
+NOVIDADES 1.6.0
+- Botao "Montar no VeraCrypt (Mac)" em cada vault vinculado.
+- Pareamento do navegador com chave publica RSA-4096 do helper local.
+- Pacote .vcmount temporario, cifrado, autenticado e com expiracao de 180 segundos.
+- Keyfiles recriados em RAM no Mac; senha enviada ao VeraCrypt oficial por --stdin.
+- Verificacao do tamanho e fingerprint do header antes da montagem.
+- Helper.app local e esquema meuc... para chamada pelo Safari/PWA.
+- Mantidos: 2+ YubiKeys FIDO2, recovery, .vcprofile, KDBX e ferramentas de header.
 
-Antes de atualizar, exporte seu KDBX, .vcprofile e mantenha backup do container.
-Nao substitua um container real por uma copia alterada antes de testar as credenciais e a recuperacao.
+Antes de atualizar, exporte seu KDBX, .vcprofile e mantenha backup do container e do header.

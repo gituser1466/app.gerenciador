@@ -4,6 +4,7 @@ const STORE = 'state';
 const VAULT_KEY = 'vault-record';
 const VC_FIDO_KEY = 'veracrypt-fido-profile';
 const VC_LINKED_PROFILES_KEY = 'veracrypt-linked-profiles-v1';
+const VC_MAC_HELPER_PAIR_KEY = 'veracrypt-macos-helper-pair-v1';
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -101,4 +102,25 @@ export async function putVeraCryptLinkedProfiles(profiles) {
 
 export async function deleteVeraCryptLinkedProfiles() {
   return run('readwrite', (store) => store.delete(VC_LINKED_PROFILES_KEY));
+}
+
+
+export async function getVeraCryptMacHelperPair() {
+  const db = await openDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).get(VC_MAC_HELPER_PAIR_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error || new Error('Falha ao ler o pareamento do helper macOS.'));
+    });
+  } finally { db.close(); }
+}
+
+export async function putVeraCryptMacHelperPair(pairing) {
+  return run('readwrite', (store) => store.put(structuredClone(pairing), VC_MAC_HELPER_PAIR_KEY));
+}
+
+export async function deleteVeraCryptMacHelperPair() {
+  return run('readwrite', (store) => store.delete(VC_MAC_HELPER_PAIR_KEY));
 }

@@ -1,4 +1,4 @@
-import { deleteVeraCryptFidoProfile, getVaultRecord, getVeraCryptFidoProfile, getVeraCryptLinkedProfiles, putVaultRecord, putVeraCryptFidoProfile, putVeraCryptLinkedProfiles } from './storage.js';
+import { deleteVeraCryptFidoProfile, deleteVeraCryptMacHelperPair, getVaultRecord, getVeraCryptFidoProfile, getVeraCryptLinkedProfiles, getVeraCryptMacHelperPair, putVaultRecord, putVeraCryptFidoProfile, putVeraCryptLinkedProfiles, putVeraCryptMacHelperPair } from './storage.js';
 import {
   FORMAT as LEGACY_FORMAT,
   getUnlockPolicy as legacyGetUnlockPolicy,
@@ -37,8 +37,9 @@ import { openSupportedFileSystem } from './filesystem.js';
 import { addSlot as addVeraCryptFidoSlot, createProfile as createVeraCryptFidoProfile, openRecoveryVault as openVeraCryptRecoveryVault, rawKeyfileBlob, recoveryFromFile, recoveryToBlob, unwrapSecretFromSlot, validateProfile as validateVeraCryptFidoProfile, wrapSecretForRegistration } from './veracrypt-fido.js';
 import { addLinkedProfileSlot, buildCredentialBundle, changeRecoveryPassword as changeLinkedRecoveryPassword, createLinkedProfile, decryptBundle as decryptLinkedBundle, materializeBundleCredentials, profileFromFile as linkedProfileFromFile, profileToBlob as linkedProfileToBlob, removeLinkedProfileSlot, unwrapDekFromRecovery as unwrapLinkedDekFromRecovery, unwrapDekFromSlot as unwrapLinkedDekFromSlot, validateLinkedProfile, verifyContainerAgainstProfile, wipeMaterializedCredentials } from './veracrypt-linked.js';
 import { base64ToBytes, bytesToBase64, clampInt, downloadBlob, formatDateTime, safeHttpUrl, uuid, wipe } from './utils.js';
+import { createMacMountPackage, macMountFilename, macMountPackageBlob, parseMacPairingFile, validateMacPairing } from './veracrypt-macos-bridge.js';
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 const $ = (id) => document.getElementById(id);
 let record = null;
 let session = null;
@@ -62,6 +63,7 @@ let vcLinkedProfiles = [];
 let vcLinkSelectedFile = null;
 let vcLinkKeyfiles = [];
 let vcLinkedPendingOpen = null;
+let vcMacPairing = null;
 
 function isLegacyRecord(value) { return value?.format === LEGACY_FORMAT; }
 function isLegacySession() { return session?.kind === 'legacy'; }
@@ -94,8 +96,11 @@ async function init() {
   vcFidoProfile = await getVeraCryptFidoProfile();
   if (vcFidoProfile) { try { validateVeraCryptFidoProfile(vcFidoProfile); } catch (e) { console.warn('Configuração VeraCrypt FIDO2 ignorada:', e); vcFidoProfile = null; } }
   vcLinkedProfiles = await getVeraCryptLinkedProfiles();
+  vcMacPairing = await getVeraCryptMacHelperPair();
+  if (vcMacPairing) { try { validateMacPairing(vcMacPairing); } catch (e) { console.warn('Pareamento macOS ignorado:', e); vcMacPairing = null; } }
   vcLinkedProfiles = vcLinkedProfiles.filter((profile) => { try { validateLinkedProfile(profile); return true; } catch (e) { console.warn('Perfil VeraCrypt vinculado ignorado:', e); return false; } });
   renderVcLinkedProfiles();
+  renderVcMacHelper();
   renderVcFido();
   if (record && !isLegacyRecord(record) && !isKdbxRecord(record)) throw new Error('Formato local desconhecido. Restaure um backup válido.');
   renderHome();
@@ -161,6 +166,9 @@ function bindEvents() {
   $('vc-linked-import').addEventListener('click', () => $('vc-linked-import-file').click());
   $('vc-linked-import-file').addEventListener('change', e => importVcLinkedProfile(e.target.files?.[0]));
   $('vc-linked-container-file').addEventListener('change', e => continueVcLinkedOpen(e.target.files?.[0] || null));
+  $('vc-mac-pair').addEventListener('click', () => $('vc-mac-pair-file').click());
+  $('vc-mac-pair-file').addEventListener('change', e => importVcMacPairing(e.target.files?.[0] || null));
+  $('vc-mac-unpair').addEventListener('click', unpairVcMacHelper);
   $('vc-fido-create').addEventListener('click', createVcFidoConfiguration);
   $('vc-fido-open').addEventListener('click', openVcWithFido);
   $('vc-fido-add-key').addEventListener('click', addVcFidoKey);
@@ -218,6 +226,7 @@ function openVeraCryptFromHome() {
   if (session) clearSessionMemory();
   clearSecretInputs();
   renderVcLinkedProfiles();
+  renderVcMacHelper();
   renderVcFido();
   setPublicScreen('veracrypt');
   $('vc-standalone-scroll').scrollTop = 0;
@@ -226,6 +235,7 @@ function openVeraCryptFromApp() {
   clearSessionMemory();
   renderHome();
   renderVcLinkedProfiles();
+  renderVcMacHelper();
   renderVcFido();
   setPublicScreen('veracrypt');
   $('vc-standalone-scroll').scrollTop = 0;
@@ -403,7 +413,9 @@ function renderVcLinkedProfiles(){
     const actions=document.createElement('div');actions.className='actions';
     const open=document.createElement('button');open.className='btn';open.textContent='Abrir com YubiKey';open.addEventListener('click',()=>queueVcLinkedOpen(profile.id,'fido',select.value));
     const test=document.createElement('button');test.className='btn ghost';test.textContent='Testar YubiKey';test.addEventListener('click',()=>testVcLinkedFido(profile.id,select.value,test));
-    const add=document.createElement('button');add.className='btn secondary';add.textContent='Adicionar YubiKey';add.disabled=profile.slots.length>=8;add.addEventListener('click',()=>addVcLinkedKey(profile.id,select.value,add));actions.append(open,test,add);card.append(actions);
+    const add=document.createElement('button');add.className='btn secondary';add.textContent='Adicionar YubiKey';add.disabled=profile.slots.length>=8;add.addEventListener('click',()=>addVcLinkedKey(profile.id,select.value,add));
+    const mountMac=document.createElement('button');mountMac.className='btn secondary';mountMac.textContent='Montar no VeraCrypt (Mac)';mountMac.disabled=!vcMacPairing;mountMac.title=vcMacPairing?'Libera as credenciais pela YubiKey e envia um pacote cifrado de uso único ao helper local.':'Instale e pareie primeiro o helper macOS abaixo.';mountMac.addEventListener('click',()=>mountVcLinkedInOfficialMac(profile.id,select.value,mountMac));
+    actions.append(open,test,add,mountMac);card.append(actions);
     const exportBtn=document.createElement('button');exportBtn.className='btn secondary';exportBtn.textContent='Exportar perfil .vcprofile';exportBtn.addEventListener('click',()=>exportVcLinkedProfile(profile.id));card.append(exportBtn);
     const details=document.createElement('details');details.className='recovery-details';const summary=document.createElement('summary');summary.textContent='Recuperação e manutenção';details.append(summary);const body=document.createElement('div');body.className='recovery-body stack';
     const recLabel=document.createElement('label');recLabel.textContent='Senha de recuperação';const rec=document.createElement('input');rec.type='password';rec.autocomplete='current-password';rec.id=`vc-linked-recovery-${profile.id}`;recLabel.append(rec);body.append(recLabel);
@@ -415,6 +427,43 @@ function renderVcLinkedProfiles(){
     appendText(body,'p','O .vcprofile contém as credenciais VeraCrypt somente cifradas. Guarde uma cópia fora do iPhone; sem ele, um aparelho novo não conhece os wrappers das YubiKeys.','hint');details.append(body);card.append(details);list.append(card);
   }
 }
+
+function shortHelperFingerprint(value){const s=String(value||'');return s.length>=24?`${s.slice(0,12)}…${s.slice(-12)}`:s;}
+function renderVcMacHelper(){
+  const status=$('vc-mac-pairing-status');if(!status)return;
+  if(vcMacPairing){status.textContent=`Helper pareado · RSA-${vcMacPairing.modulusLength||'?' } · ${shortHelperFingerprint(vcMacPairing.fingerprint)}${vcMacPairing.helperVersion?` · ${vcMacPairing.helperVersion}`:''}`;$('vc-mac-unpair').disabled=false;}
+  else{status.textContent='Helper ainda não pareado. Instale o helper no Mac, depois importe o arquivo MeuCofre-VeraCrypt-macOS.mcpair gerado por ele.';$('vc-mac-unpair').disabled=true;}
+}
+async function importVcMacPairing(file){
+  if(!file)return;
+  try{const pairing=await parseMacPairingFile(file);vcMacPairing=pairing;await putVeraCryptMacHelperPair(pairing);renderVcMacHelper();renderVcLinkedProfiles();showToast('Helper macOS pareado. Os pacotes de montagem só poderão ser abertos pela chave privada deste Mac.','success');}
+  catch(e){showToast(e.message||String(e),'error');}
+  finally{$('vc-mac-pair-file').value='';}
+}
+async function unpairVcMacHelper(){
+  if(!vcMacPairing)return;
+  if(!confirm('Remover o pareamento deste navegador? O helper instalado no Mac não será apagado.'))return;
+  await deleteVeraCryptMacHelperPair();vcMacPairing=null;renderVcMacHelper();renderVcLinkedProfiles();showToast('Pareamento macOS removido deste navegador.','success');
+}
+function wipeLinkedBundle(bundle){if(!bundle)return;bundle.password='';for(const k of bundle.keyfiles||[])k.data='';}
+async function mountVcLinkedInOfficialMac(profileId,slotId,button){
+  const profile=getVcLinkedProfile(profileId);if(!profile)return showToast('Perfil VeraCrypt não encontrado.','error');
+  if(!vcMacPairing)return showToast('Instale e pareie o helper macOS primeiro.','error');
+  const old=button.textContent;let bundle=null;
+  try{
+    button.disabled=true;button.textContent='Aguardando YubiKey...';
+    bundle=await linkedBundleViaFido(profile,slotId);
+    button.textContent='Preparando pacote cifrado...';
+    const pkg=await createMacMountPackage(profile,bundle,vcMacPairing);
+    const filename=macMountFilename(profile);
+    downloadBlob(macMountPackageBlob(pkg),filename);
+    showToast('Pacote de montagem cifrado criado. O helper será chamado; se o Safari bloquear, abra o helper manualmente.','success');
+    button.textContent='Abrindo helper...';
+    setTimeout(()=>{try{window.location.href='meucofre-veracrypt://mount-latest';}catch{}},450);
+  }catch(e){showToast(e.message||String(e),'error');}
+  finally{wipeLinkedBundle(bundle);setTimeout(()=>{button.disabled=!vcMacPairing;button.textContent=old;},900);}
+}
+
 async function createVcLinkedProfileFromExisting(){
   const name=$('vc-link-name').value.trim(),recovery=$('vc-link-recovery').value,repeat=$('vc-link-recovery2').value;
   if(!vcLinkSelectedFile)return showToast('Selecione o container VeraCrypt existente.','error');
