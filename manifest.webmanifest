@@ -1,10 +1,1 @@
-{
-  "id":"./","name":"Meu Cofre","short_name":"Meu Cofre",
-  "description":"Gerenciador local/offline com KDBX 4.1, vaults VeraCrypt vinculados, YubiKey FIDO2 e montagem no VeraCrypt oficial do macOS.",
-  "lang":"pt-BR","start_url":"./","scope":"./","display":"standalone",
-  "background_color":"#090b10","theme_color":"#090b10","categories":["security","utilities"],
-  "icons":[
-    {"src":"./icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
-    {"src":"./icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
-  ]
-}
+{"id":"./","name":"Meu Cofre","short_name":"Meu Cofre","description":"Cofre local com KDBX 4.1, VeraCrypt, YubiKey FIDO2, recovery e montagem no Finder pelo VeraCrypt oficial.","lang":"pt-BR","start_url":"./","scope":"./","display":"standalone","background_color":"#0b0e14","theme_color":"#0b0e14","categories":["security","utilities"],"icons":[{"src":"./icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},{"src":"./icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}]}

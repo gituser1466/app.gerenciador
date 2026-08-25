@@ -1,15 +1,13 @@
-MEU COFRE 1.6.0 - KDBX + VERACRYPT + FIDO2 NO VERACRYPT OFICIAL DO MAC
+MEU COFRE 1.7.0 — KDBX + VERACRYPT + FIDO2 + MACOS
 
-Envie TODOS os arquivos desta pasta para a raiz do MESMO repositorio GitHub Pages.
-Nao envie o ZIP. Nao mude o dominio/origem se ja cadastrou YubiKeys WebAuthn.
+NOVIDADES
+- Interface renovada e mais consistente no iPhone e no Mac.
+- Navegação lateral em telas grandes.
+- Vault vinculado destaca “Montar no Finder”.
+- Volume já montado deixa de aparecer como erro.
+- Helper macOS atualizado para v1.7.0.
 
-NOVIDADES 1.6.0
-- Botao "Montar no VeraCrypt (Mac)" em cada vault vinculado.
-- Pareamento do navegador com chave publica RSA-4096 do helper local.
-- Pacote .vcmount temporario, cifrado, autenticado e com expiracao de 180 segundos.
-- Keyfiles recriados em RAM no Mac; senha enviada ao VeraCrypt oficial por --stdin.
-- Verificacao do tamanho e fingerprint do header antes da montagem.
-- Helper.app local e esquema meuc... para chamada pelo Safari/PWA.
-- Mantidos: 2+ YubiKeys FIDO2, recovery, .vcprofile, KDBX e ferramentas de header.
-
-Antes de atualizar, exporte seu KDBX, .vcprofile e mantenha backup do container e do header.
+IMPORTANTE
+- Mantenha a mesma origem/URL do GitHub Pages para as credenciais WebAuthn.
+- O launcher macOS fornecido separadamente abre essa mesma origem no Safari; ele não copia o cofre para dentro do aplicativo.
+- Esta release foi testada internamente, mas não substitui auditoria criptográfica externa.

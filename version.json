@@ -1,1 +1,1 @@
-{"version":"1.6.0","channel":"candidate","released":"2026-08-25","format":"KDBX 4.1","veracrypt":"linked vaults + 2+ FIDO2 keys + recovery + native macOS VeraCrypt bridge"}
+{"version":"1.7.0","channel":"candidate","released":"2026-08-25","format":"KDBX 4.1","veracrypt":"linked vaults + 2+ FIDO2 keys + recovery + native macOS bridge + mounted-state UX","ui":"refined responsive desktop/mobile interface"}

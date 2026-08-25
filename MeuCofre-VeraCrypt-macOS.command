@@ -1,12 +1,12 @@
 #!/bin/zsh
 set -eu
 
-# Meu Cofre - VeraCrypt macOS bridge v1.6.0
+# Meu Cofre - VeraCrypt macOS bridge v1.7.0
 # Instala um helper local que recebe SOMENTE pacotes .vcmount cifrados para a
 # chave publica deste Mac. A senha VeraCrypt e enviada ao VeraCrypt oficial por
 # stdin; keyfiles sao recriados em um RAM disk e removidos apos a montagem.
 
-APP_VERSION="1.6.0"
+APP_VERSION="1.7.0"
 SUPPORT="$HOME/Library/Application Support/MeuCofreVeraCrypt"
 PRIVATE_KEY="$SUPPORT/helper-private.pem"
 PUBLIC_KEY="$SUPPORT/helper-public.pem"
@@ -73,7 +73,7 @@ install_handler() {
 set -eu
 setopt NULL_GLOB
 
-APP_VERSION="1.6.0"
+APP_VERSION="1.7.0"
 SUPPORT="$HOME/Library/Application Support/MeuCofreVeraCrypt"
 PRIVATE_KEY="$SUPPORT/helper-private.pem"
 PUBLIC_KEY="$SUPPORT/helper-public.pem"
@@ -249,6 +249,21 @@ if ! verify_volume "$VOLUME"; then
   print -rn -- "$VOLUME" > "$MAPFILE"; chmod 600 "$MAPFILE"
 fi
 
+# UX v1.7: montar novamente um vault que ja esta aberto nao e erro.
+# O --list aceita o caminho do volume montado e nao envolve credenciais.
+set +e
+MOUNTED_INFO="$("$VC" -t --list "$VOLUME" 2>&1)"
+MOUNTED_RC=$?
+set -e
+if [[ $MOUNTED_RC -eq 0 && -n "$MOUNTED_INFO" ]]; then
+  print "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] already-mounted profile=$PROFILE_ID volume=$VOLUME" >> "$LOG"
+  rm -f "$PACKAGE" 2>/dev/null || true
+  notify_ok "Este vault ja esta montado no Finder."
+  /usr/bin/open /Volumes >/dev/null 2>&1 || true
+  exit 0
+fi
+MOUNTED_INFO=""
+
 ARGS=(-t --non-interactive --stdin "--pim=$PIM" --protect-hidden=no)
 if [[ "$HASH" != "auto" ]]; then ARGS+=("--hash=$HASH"); fi
 if [[ "$HIDDEN" == "true" ]]; then ARGS+=(--volume-type=hidden); fi
@@ -259,17 +274,26 @@ fi
 ARGS+=(--mount "$VOLUME")
 
 print "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] mount profile=$PROFILE_ID volume=$VOLUME" >> "$LOG"
+VC_OUT="$RAMVOL/veracrypt-output.txt"
 set +e
-printf '%s\n' "$PASSWORD" | "$VC" "${ARGS[@]}" >>"$LOG" 2>&1
+printf '%s\n' "$PASSWORD" | "$VC" "${ARGS[@]}" >"$VC_OUT" 2>&1
 RC=$?
 set -e
+cat "$VC_OUT" >>"$LOG" 2>/dev/null || true
 PASSWORD=""; SECRET_HEX=""; PRIVPASS=""; MACKEY_HEX=""
 if [[ $RC -ne 0 ]]; then
-  alert "O VeraCrypt oficial recusou a montagem. Consulte $LOG. O pacote .vcmount foi mantido para diagnostico."
+  if /usr/bin/grep -qi "already mounted" "$VC_OUT" 2>/dev/null; then
+    print "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] already-mounted-after-attempt profile=$PROFILE_ID volume=$VOLUME" >> "$LOG"
+    rm -f "$PACKAGE" 2>/dev/null || true
+    notify_ok "Este vault ja esta montado no Finder."
+    /usr/bin/open /Volumes >/dev/null 2>&1 || true
+    exit 0
+  fi
+  alert "O VeraCrypt nao conseguiu montar o vault. Consulte $LOG. O pacote .vcmount foi mantido para diagnostico."
   exit $RC
 fi
 rm -f "$PACKAGE" 2>/dev/null || true
-notify_ok "Vault montado pelo VeraCrypt oficial."
+notify_ok "Vault montado no Finder."
 /usr/bin/open /Volumes >/dev/null 2>&1 || true
 exit 0
 HANDLER_EOF
@@ -332,9 +356,13 @@ else
 fi
 print
 print "Agora, no Meu Cofre:"
-print "  Vault VeraCrypt -> VeraCrypt oficial no macOS -> Importar pareamento .mcpair"
-print "Depois use 'Montar no VeraCrypt (Mac)' no vault vinculado."
+print "  Vault VeraCrypt -> Integracao macOS -> Importar pareamento .mcpair"
+print "Depois use 'Montar no Finder' no vault vinculado."
 print
+if [[ "${1:-}" == "--install-only" ]]; then
+  print "Instalacao/atualizacao concluida."
+  exit 0
+fi
 print "Opcoes:"
 print "  1) Montar agora o pacote .vcmount mais recente"
 print "  2) Escolher um pacote .vcmount"

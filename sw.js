@@ -1,21 +1,21 @@
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 const CACHE = `meucofre-shell-v${APP_VERSION}`;
 
 // Hashes gerados no fechamento da release. O Service Worker recusa uma instalação
 // parcial/corrompida. Isso protege contra erro de upload/cache; não substitui a
 // segurança da conta/origem de hospedagem, pois quem controla a origem controla o SW.
 const ASSET_HASHES = Object.freeze({
-  './index.html': 'a4aa2e5fd9903c4aeaf42e96688fa4ef877b02ba61044153297a71d6ff49d011',
-  './styles.css': '5b76d5d157714c004fce7d25035f8fd1095353f9a0b279209f4d9ec89cc20182',
-  './manifest.webmanifest': '5a8ed35e50d386f359e126dc46a7c0c30e4fb569727d8f572829821f74f54a2b',
+  './index.html': 'ece70201fad5bd0c5e4c0d510304c0325f31267707285828f5d7545bf883cc5a',
+  './styles.css': 'f8e90ad4881797b690caea9fdc70554af0f22b9605c74cba5ec57f1552b31d79',
+  './manifest.webmanifest': 'de93d3fb787c8fb0d0d42f4d0dcf88a68900015ca30ae775d88597d824760686',
   './icon-192.png': '8dd0fc36a67b996a4586d795b92510d2f7e22a22d9ba8a4bb0b569653a7c2ad0',
   './icon-512.png': '0c81756a3fed05816ba2c236e75092ccbce3a3c08e3edea9c3253b5abeb7e51e',
   './apple-touch-icon.png': '5e0434ff5e6d4b54a376bb72ee9dfca9eb7cf04d152f6fb275bbb7c558e65e6e',
-  './app.js': 'c111bb7ab7b02bdbc844b07a4b6c39282c8b1f12c0dbbcc3b810be5a2fe91d90',
+  './app.js': 'be293db6dbe283af611ba6f1e0b13365368109846ba925add74655fd88f11923',
   './utils.js': 'fb5a397fda790ba7f596b6eb2ca1e8a72bb67578eaa0c406f466205cafa8a70b',
   './storage.js': 'c37814b23abd14e0ac49f56837ec9decbcd74a3657ec30c130a763e1b902da21',
   './legacy-vault.js': 'd663a38de94a994c4ba1a713a6934556327b192464fb9867bff145b0826481f3',
-  './kdbx.js': '9de8977550e14134fced34742df8978db0995d0ce4fc3915ffd7afcaef5752f9',
+  './kdbx.js': 'b7b2a13ce646da1d2103a4af04bb5d57d686e958db563a343f2fd81489955ff0',
   './webauthn.js': 'a4e9bb9fbea5780f341e034dc64737b6838755a00482c92f0614c59345a59f36',
   './totp.js': '137058587a6d0db77a751f7731b8795baf0cfff3ebb70e550dc6a36144a80679',
   './generator.js': '81197ae74f52857dbcaa61581b462a7a442c4c909d045d9b2708490610582085',
@@ -27,7 +27,7 @@ const ASSET_HASHES = Object.freeze({
   './filesystem.js': '4bb193f2ad835914a0306eea120821106765d1f0f223f3a8baf874afdde20755',
   './fat.js': '82ea09aacd1360efb5fa6a1ecba33d7ef36e892239c9a517d2fddc5dc870b5b9',
   './exfat.js': '443184ffcc20b2a9f9ff050d5beb6f1cef8fb3435e05c1c18de75d21c6fcdc05',
-  './MeuCofre-VeraCrypt-macOS.command': '2341ea4e372a98427eb0da048311702c9fe61bd9c0af73e998eb495d3eec8135'
+  './MeuCofre-VeraCrypt-macOS.command': 'b5eae1601b027449342dd0a65ddfbced721b5a0f0aceddacf1209e5ff058eeab'
 });
 
 function toHex(buffer) {

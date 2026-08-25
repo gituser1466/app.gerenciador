@@ -39,7 +39,7 @@ import { addLinkedProfileSlot, buildCredentialBundle, changeRecoveryPassword as 
 import { base64ToBytes, bytesToBase64, clampInt, downloadBlob, formatDateTime, safeHttpUrl, uuid, wipe } from './utils.js';
 import { createMacMountPackage, macMountFilename, macMountPackageBlob, parseMacPairingFile, validateMacPairing } from './veracrypt-macos-bridge.js';
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 const $ = (id) => document.getElementById(id);
 let record = null;
 let session = null;
@@ -411,11 +411,11 @@ function renderVcLinkedProfiles(){
     const fp=document.createElement('div');fp.className='hint';fp.textContent=`Header: ${shortFingerprint(profile.container.headerFingerprint)}${profile.lastVerifiedAt?` · validado ${formatDateTime(profile.lastVerifiedAt)}`:''}`;card.append(fp);
     const slotLabel=document.createElement('label');slotLabel.textContent='YubiKey';const select=document.createElement('select');select.id=`vc-linked-slot-${profile.id}`;for(const slot of profile.slots){const o=document.createElement('option');o.value=slot.id;o.textContent=`${slot.label||'YubiKey FIDO2'}${slot.lastTestedAt?' ✓':''}`;select.append(o);}slotLabel.append(select);card.append(slotLabel);
     const actions=document.createElement('div');actions.className='actions';
-    const open=document.createElement('button');open.className='btn';open.textContent='Abrir com YubiKey';open.addEventListener('click',()=>queueVcLinkedOpen(profile.id,'fido',select.value));
+    const open=document.createElement('button');open.className='btn secondary';open.textContent='Abrir no Meu Cofre';open.addEventListener('click',()=>queueVcLinkedOpen(profile.id,'fido',select.value));
     const test=document.createElement('button');test.className='btn ghost';test.textContent='Testar YubiKey';test.addEventListener('click',()=>testVcLinkedFido(profile.id,select.value,test));
     const add=document.createElement('button');add.className='btn secondary';add.textContent='Adicionar YubiKey';add.disabled=profile.slots.length>=8;add.addEventListener('click',()=>addVcLinkedKey(profile.id,select.value,add));
-    const mountMac=document.createElement('button');mountMac.className='btn secondary';mountMac.textContent='Montar no VeraCrypt (Mac)';mountMac.disabled=!vcMacPairing;mountMac.title=vcMacPairing?'Libera as credenciais pela YubiKey e envia um pacote cifrado de uso único ao helper local.':'Instale e pareie primeiro o helper macOS abaixo.';mountMac.addEventListener('click',()=>mountVcLinkedInOfficialMac(profile.id,select.value,mountMac));
-    actions.append(open,test,add,mountMac);card.append(actions);
+    const mountMac=document.createElement('button');mountMac.className=vcMacPairing?'btn mac-primary':'btn secondary';mountMac.textContent='Montar no Finder';mountMac.disabled=!vcMacPairing;mountMac.title=vcMacPairing?'Libera as credenciais pela YubiKey e envia um pacote cifrado de uso único ao helper local.':'Instale e pareie primeiro o helper macOS abaixo.';mountMac.addEventListener('click',()=>mountVcLinkedInOfficialMac(profile.id,select.value,mountMac));
+    actions.append(mountMac,open,test,add);card.append(actions);
     const exportBtn=document.createElement('button');exportBtn.className='btn secondary';exportBtn.textContent='Exportar perfil .vcprofile';exportBtn.addEventListener('click',()=>exportVcLinkedProfile(profile.id));card.append(exportBtn);
     const details=document.createElement('details');details.className='recovery-details';const summary=document.createElement('summary');summary.textContent='Recuperação e manutenção';details.append(summary);const body=document.createElement('div');body.className='recovery-body stack';
     const recLabel=document.createElement('label');recLabel.textContent='Senha de recuperação';const rec=document.createElement('input');rec.type='password';rec.autocomplete='current-password';rec.id=`vc-linked-recovery-${profile.id}`;recLabel.append(rec);body.append(recLabel);
@@ -431,8 +431,8 @@ function renderVcLinkedProfiles(){
 function shortHelperFingerprint(value){const s=String(value||'');return s.length>=24?`${s.slice(0,12)}…${s.slice(-12)}`:s;}
 function renderVcMacHelper(){
   const status=$('vc-mac-pairing-status');if(!status)return;
-  if(vcMacPairing){status.textContent=`Helper pareado · RSA-${vcMacPairing.modulusLength||'?' } · ${shortHelperFingerprint(vcMacPairing.fingerprint)}${vcMacPairing.helperVersion?` · ${vcMacPairing.helperVersion}`:''}`;$('vc-mac-unpair').disabled=false;}
-  else{status.textContent='Helper ainda não pareado. Instale o helper no Mac, depois importe o arquivo MeuCofre-VeraCrypt-macOS.mcpair gerado por ele.';$('vc-mac-unpair').disabled=true;}
+  if(vcMacPairing){status.classList.add('mac-ready');status.textContent=`Helper pareado · RSA-${vcMacPairing.modulusLength||'?' } · ${shortHelperFingerprint(vcMacPairing.fingerprint)}${vcMacPairing.helperVersion?` · ${vcMacPairing.helperVersion}`:''}`;$('vc-mac-unpair').disabled=false;}
+  else{status.classList.remove('mac-ready');status.textContent='Helper ainda não pareado. Instale o helper no Mac, depois importe o arquivo MeuCofre-VeraCrypt-macOS.mcpair gerado por ele.';$('vc-mac-unpair').disabled=true;}
 }
 async function importVcMacPairing(file){
   if(!file)return;
@@ -457,8 +457,8 @@ async function mountVcLinkedInOfficialMac(profileId,slotId,button){
     const pkg=await createMacMountPackage(profile,bundle,vcMacPairing);
     const filename=macMountFilename(profile);
     downloadBlob(macMountPackageBlob(pkg),filename);
-    showToast('Pacote de montagem cifrado criado. O helper será chamado; se o Safari bloquear, abra o helper manualmente.','success');
-    button.textContent='Abrindo helper...';
+    showToast('YubiKey validada. Enviando o vault ao VeraCrypt do Mac…','success');
+    button.textContent='Abrindo no Finder…';
     setTimeout(()=>{try{window.location.href='meucofre-veracrypt://mount-latest';}catch{}},450);
   }catch(e){showToast(e.message||String(e),'error');}
   finally{wipeLinkedBundle(bundle);setTimeout(()=>{button.disabled=!vcMacPairing;button.textContent=old;},900);}
