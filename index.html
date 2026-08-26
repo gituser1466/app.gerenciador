@@ -11,16 +11,16 @@
   <meta name="apple-mobile-web-app-title" content="Meu Cofre">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'self'; manifest-src 'self'; media-src 'none'">
   <title>Meu Cofre</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=1.8.1">
-  <link rel="icon" href="./icon-192.png?v=1.8.1" sizes="192x192">
-  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=1.8.1">
-  <link rel="stylesheet" href="./styles.css?v=1.8.1">
+  <link rel="manifest" href="./manifest.webmanifest?v=1.9.0">
+  <link rel="icon" href="./icon-192.png?v=1.9.0" sizes="192x192">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=1.9.0">
+  <link rel="stylesheet" href="./styles.css?v=1.9.0">
 </head>
 <body>
   <main class="shell">
     <div class="brand" id="public-brand">
       <div class="brand-mark" aria-hidden="true">MC</div>
-      <div class="brand-copy"><h1>Meu Cofre</h1><p>Privacidade local para KDBX, VeraCrypt e YubiKey</p><small id="public-version" class="hint">v1.8.1</small></div>
+      <div class="brand-copy"><h1>Meu Cofre</h1><p>Privacidade local para KDBX, VeraCrypt e YubiKey</p><small id="public-version" class="hint">v1.9.0</small></div>
     </div>
 
     <section id="screen-home" class="home-screen" hidden>
@@ -240,8 +240,17 @@
       <div class="app-scroll" id="app-scroll">
         <header class="topbar"><div class="title"><h2 id="app-vault-name">Meu Cofre</h2><small id="app-count">0 itens</small></div><button class="btn ghost small" id="app-home-btn">Início</button><button class="btn ghost small" id="lock-btn">Bloquear</button></header>
         <section class="view active" data-view="vault">
-          <input class="search" id="search" type="search" placeholder="Buscar por título, usuário, site ou tag" autocomplete="off" autocapitalize="none">
-          <div id="entry-list" class="entry-list"></div><button class="fab" id="add-entry" aria-label="Adicionar item">+</button>
+          <div class="vault-layout">
+            <aside class="group-panel" aria-label="Pastas do KDBX">
+              <div class="group-panel-head"><div><strong>Pastas</strong><small id="group-context">Estrutura KeePassXC</small></div><button class="icon-btn subtle" id="add-group" type="button" aria-label="Nova pasta" title="Nova pasta">+</button></div>
+              <button class="group-all active" id="group-all" type="button"><span>Todos os itens</span><small id="group-all-count">0</small></button>
+              <div id="group-tree" class="group-tree"></div>
+            </aside>
+            <div class="entry-pane">
+              <div class="entry-toolbar"><input class="search" id="search" type="search" placeholder="Buscar na pasta atual" autocomplete="off" autocapitalize="none"><button class="btn ghost small" id="edit-current-group" type="button" hidden>Editar pasta</button></div>
+              <div id="entry-list" class="entry-list"></div><button class="fab" id="add-entry" aria-label="Adicionar item">+</button>
+            </div>
+          </div>
         </section>
         <section class="view" data-view="generator">
           <div class="section"><h3>Gerador de senha</h3><div class="card stack"><div id="generated-password" class="generated" aria-live="polite"></div><div class="grid-2"><label>Comprimento<input id="gen-length" type="number" min="8" max="128" value="24"></label><div class="checkbox-row"><label><input id="gen-lower" type="checkbox" checked> a-z</label><label><input id="gen-upper" type="checkbox" checked> A-Z</label><label><input id="gen-digits" type="checkbox" checked> 0-9</label><label><input id="gen-symbols" type="checkbox" checked> símbolos</label></div></div><div class="actions"><button class="btn" id="generate-btn">Gerar</button><button class="btn secondary" id="copy-generated">Copiar</button></div></div></div>
@@ -258,17 +267,19 @@
         <section class="view" data-view="settings">
           <div class="section"><h3>Bloqueio automático</h3><div class="card stack"><label>Por inatividade (minutos)<input id="setting-idle" type="number" min="1" max="120"></label><label>Ao deixar o app em segundo plano (segundos)<input id="setting-background" type="number" min="0" max="300"></label><label>Limpar área de transferência após (segundos)<input id="setting-clipboard" type="number" min="0" max="300"></label><button class="btn secondary" id="save-settings">Salvar configurações</button></div></div>
           <div class="section"><h3>Armazenamento</h3><div class="card stack"><button class="btn secondary" id="request-persistent">Solicitar armazenamento persistente</button><div id="persistent-status" class="hint"></div></div></div>
-          <div class="section"><h3>Sobre</h3><div class="card stack"><div class="row"><div class="row-main"><div class="row-title">Meu Cofre</div><div class="row-sub">1.8.1 · compatibilidade ampliada com KeePassXC + VeraCrypt no Finder + 2+ YubiKeys + recovery</div></div></div><div class="security-note">Sem telemetria, sem CDN e sem servidor de senhas. A hospedagem entrega apenas o código. Um comprometimento da origem web ainda é um risco estrutural de qualquer PWA; proteja sua conta GitHub e o repositório com autenticação forte.</div></div></div>
+          <div class="section"><h3>Sobre</h3><div class="card stack"><div class="row"><div class="row-main"><div class="row-title">Meu Cofre</div><div class="row-sub">1.9.0 · grupos KeePassXC preservados + edição KDBX nativa + VeraCrypt no Finder + 2+ YubiKeys + recovery</div></div></div><div class="security-note">Sem telemetria, sem CDN e sem servidor de senhas. A hospedagem entrega apenas o código. Um comprometimento da origem web ainda é um risco estrutural de qualquer PWA; proteja sua conta GitHub e o repositório com autenticação forte.</div></div></div>
         </section>
       </div>
       <nav class="bottom-nav" aria-label="Navegação"><button class="nav-btn active" data-nav="vault"><span>⌂</span>Cofre</button><button class="nav-btn" data-nav="generator"><span>✦</span>Gerador</button><button class="nav-btn" id="open-veracrypt-from-app"><span>◇</span>Volumes</button><button class="nav-btn" data-nav="security"><span>⌾</span>Segurança</button><button class="nav-btn" data-nav="settings"><span>⚙</span>Ajustes</button></nav>
     </section>
   </main>
 
-  <div id="entry-modal" class="modal-backdrop" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="entry-modal-title"><div class="modal-head"><h3 id="entry-modal-title">Novo item</h3><button class="icon-btn" id="entry-close" aria-label="Fechar">×</button></div><form id="entry-form" class="stack"><input id="entry-id" type="hidden"><label>Título<input id="entry-title" required maxlength="160" autocomplete="off"></label><label>Usuário / e-mail<input id="entry-username" maxlength="320" autocomplete="off" autocapitalize="none" spellcheck="false"></label><label>Senha<div class="password-wrap"><input id="entry-password" type="password" autocomplete="off" autocapitalize="none" spellcheck="false"><button type="button" class="btn secondary small" id="entry-show-password">Mostrar</button><button type="button" class="btn secondary small" id="entry-generate-password">Gerar</button></div></label><label>Site / URL<input id="entry-url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"></label><label>Tags<input id="entry-tags" placeholder="trabalho, banco, pessoal" autocomplete="off"></label><label>Segredo TOTP (Base32)<input id="entry-totp" autocomplete="off" autocapitalize="characters" spellcheck="false"></label><div id="entry-totp-box" class="totp-box" hidden><div><div class="hint">Código atual</div><div id="entry-totp-code" class="totp-code">------</div></div><div id="entry-totp-remaining" class="pill"></div><button type="button" class="btn secondary small" id="entry-copy-totp">Copiar</button></div><label>Notas<textarea id="entry-notes" autocomplete="off" spellcheck="false"></textarea></label><label class="checkbox-label"><input id="entry-favorite" type="checkbox"> Favorito</label><div class="actions"><button type="submit" class="btn">Salvar</button><button type="button" class="btn danger" id="entry-delete" hidden>Excluir</button></div><div class="actions" id="entry-quick-actions" hidden><button type="button" class="btn secondary" id="entry-copy-user">Copiar usuário</button><button type="button" class="btn secondary" id="entry-copy-pass">Copiar senha</button><button type="button" class="btn secondary" id="entry-open-url">Abrir site</button></div></form></div></div>
+  <div id="entry-modal" class="modal-backdrop" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="entry-modal-title"><div class="modal-head"><h3 id="entry-modal-title">Novo item</h3><button class="icon-btn" id="entry-close" aria-label="Fechar">×</button></div><form id="entry-form" class="stack"><input id="entry-id" type="hidden"><label>Pasta<select id="entry-group"></select></label><label>Título<input id="entry-title" required maxlength="160" autocomplete="off"></label><label>Usuário / e-mail<input id="entry-username" maxlength="320" autocomplete="off" autocapitalize="none" spellcheck="false"></label><label>Senha<div class="password-wrap"><input id="entry-password" type="password" autocomplete="off" autocapitalize="none" spellcheck="false"><button type="button" class="btn secondary small" id="entry-show-password">Mostrar</button><button type="button" class="btn secondary small" id="entry-generate-password">Gerar</button></div></label><label>Site / URL<input id="entry-url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"></label><label>Tags<input id="entry-tags" placeholder="trabalho, banco, pessoal" autocomplete="off"></label><label>Segredo TOTP (Base32)<input id="entry-totp" autocomplete="off" autocapitalize="characters" spellcheck="false"></label><div id="entry-totp-box" class="totp-box" hidden><div><div class="hint">Código atual</div><div id="entry-totp-code" class="totp-code">------</div></div><div id="entry-totp-remaining" class="pill"></div><button type="button" class="btn secondary small" id="entry-copy-totp">Copiar</button></div><label>Notas<textarea id="entry-notes" autocomplete="off" spellcheck="false"></textarea></label><label class="checkbox-label"><input id="entry-favorite" type="checkbox"> Favorito</label><div class="actions"><button type="submit" class="btn">Salvar</button><button type="button" class="btn danger" id="entry-delete" hidden>Excluir</button></div><div class="actions" id="entry-quick-actions" hidden><button type="button" class="btn secondary" id="entry-copy-user">Copiar usuário</button><button type="button" class="btn secondary" id="entry-copy-pass">Copiar senha</button><button type="button" class="btn secondary" id="entry-open-url">Abrir site</button></div></form></div></div>
+
+  <div id="group-modal" class="modal-backdrop" hidden><div class="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="group-modal-title"><div class="modal-head"><h3 id="group-modal-title">Nova pasta</h3><button class="icon-btn" id="group-close" aria-label="Fechar">×</button></div><form id="group-form" class="stack"><label>Nome da pasta<input id="group-name" required maxlength="160" autocomplete="off"></label><label>Pasta superior<select id="group-parent"></select></label><div class="actions"><button type="submit" class="btn">Salvar</button><button type="button" class="btn danger" id="group-delete" hidden>Excluir pasta</button></div><p class="hint">A hierarquia é gravada no próprio KDBX. Campos avançados do grupo que o Meu Cofre não edita permanecem preservados.</p></form></div></div>
 
   <div id="toast" class="toast" hidden></div>
   <div id="update-banner" class="update-banner" hidden><strong>Atualização disponível</strong><div class="hint">A nova versão só será ativada quando você confirmar.</div><div class="actions"><button class="btn small" id="apply-update">Atualizar agora</button><button class="btn ghost small" id="dismiss-update">Depois</button></div></div>
-  <script type="module" src="./app.js?v=1.8.1"></script>
+  <script type="module" src="./app.js?v=1.9.0"></script>
 </body>
 </html>

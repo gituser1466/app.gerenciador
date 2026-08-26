@@ -31,7 +31,7 @@ const KDF_ARGON2ID = hex('9E298B1956DB4773B23DFC3EC6F0A1E6');
 const ZERO_UUID = new Uint8Array(16);
 const EPOCH_0001_TO_1970 = 62135596800n;
 const PUBLIC_SCHEMA = 1;
-const APP_VERSION = '1.8.1';
+const APP_VERSION = '1.9.0';
 const BLOCK_SIZE = 1024 * 1024;
 const MAX_FILE_BYTES = 128 * 1024 * 1024;
 const MAX_XML_BYTES = 128 * 1024 * 1024;
@@ -448,13 +448,35 @@ function entryXml(entry,stream){
   return `<Entry><UUID>${bytesToBase64(id)}</UUID><IconID>0</IconID><ForegroundColor></ForegroundColor><BackgroundColor></BackgroundColor><OverrideURL></OverrideURL><Tags>${xmlEscape((entry.tags||[]).join(';'))}</Tags>${timesXml(entry.createdAt,entry.updatedAt)}${strings.join('')}<AutoType><Enabled>True</Enabled><DataTransferObfuscation>0</DataTransferObfuscation></AutoType></Entry>`;
 }
 
+function normalizeVaultGroups(vault){
+  let groups=Array.isArray(vault.groups)?vault.groups.filter(g=>g&&typeof g==='object'):[];
+  let root=groups.find(g=>g.isRoot)||groups.find(g=>g.kdbxUuidBytes===vault.rootGroupUuid)||null;
+  if(!root){
+    const rootUuid=vault.rootGroupUuid||bytesToBase64(randomBytes(16));
+    root={id:uuid(),kdbxUuidBytes:rootUuid,parentUuid:null,name:vault.name||'Meu Cofre',notes:'',iconId:'48',isExpanded:true,enableAutoType:'null',enableSearching:'null',createdAt:vault.createdAt||new Date().toISOString(),updatedAt:vault.updatedAt||new Date().toISOString(),isRoot:true};
+    groups=[root,...groups];
+  }
+  root.isRoot=true;root.parentUuid=null;vault.rootGroupUuid=root.kdbxUuidBytes;
+  const valid=new Set(groups.map(g=>g.kdbxUuidBytes).filter(Boolean));
+  for(const g of groups){if(!g.kdbxUuidBytes)g.kdbxUuidBytes=bytesToBase64(randomBytes(16));if(!g.isRoot&&(!g.parentUuid||!valid.has(g.parentUuid)))g.parentUuid=root.kdbxUuidBytes;}
+  for(const e of vault.entries||[])if(!e.groupUuid||!valid.has(e.groupUuid))e.groupUuid=root.kdbxUuidBytes;
+  vault.groups=groups;return{groups,root};
+}
+function groupXml(group,groups,entries,stream,major=4){
+  const uuidB64=group.kdbxUuidBytes||bytesToBase64(randomBytes(16));group.kdbxUuidBytes=uuidB64;
+  const children=groups.filter(g=>!g.isRoot&&g.parentUuid===uuidB64).map(g=>groupXml(g,groups,entries,stream,major)).join('');
+  const ownEntries=entries.filter(e=>e.groupUuid===uuidB64).map(e=>entryXml(e,stream)).join('');
+  const created=group.createdAt||new Date().toISOString(),modified=group.updatedAt||created;
+  const exp=group.isExpanded===false?'False':'True';
+  const ena=(group.enableAutoType===true||group.enableAutoType==='True')?'True':(group.enableAutoType===false||group.enableAutoType==='False')?'False':'null';
+  const ens=(group.enableSearching===true||group.enableSearching==='True')?'True':(group.enableSearching===false||group.enableSearching==='False')?'False':'null';
+  return `<Group><UUID>${uuidB64}</UUID><Name>${xmlEscape(group.name||'Pasta')}</Name><Notes>${xmlEscape(group.notes||'')}</Notes><IconID>${xmlEscape(group.iconId||'48')}</IconID>${timesXml(created,modified)}<IsExpanded>${exp}</IsExpanded><DefaultAutoTypeSequence>${xmlEscape(group.defaultAutoTypeSequence||'')}</DefaultAutoTypeSequence><EnableAutoType>${ena}</EnableAutoType><EnableSearching>${ens}</EnableSearching><LastTopVisibleEntry>${bytesToBase64(ZERO_UUID)}</LastTopVisibleEntry>${ownEntries}${children}</Group>`;
+}
 function buildVaultXml(vault,stream){
-  const now=new Date().toISOString();
-  if(!vault.rootGroupUuid) vault.rootGroupUuid=bytesToBase64(randomBytes(16));
-  const rootUuid=base64ToBytes(vault.rootGroupUuid);
+  const now=new Date().toISOString();const {groups,root}=normalizeVaultGroups(vault);
   const customSettings=bytesToBase64(utf8(JSON.stringify(vault.settings||{})));
-  const entries=(vault.entries||[]).map(e=>entryXml(e,stream)).join('');
-  return `<?xml version="1.0" encoding="utf-8"?><KeePassFile><Meta><Generator>Meu Cofre ${APP_VERSION}</Generator><DatabaseName>${xmlEscape(vault.name||'Meu Cofre')}</DatabaseName><DatabaseNameChanged>${isoToKdbxTime(vault.updatedAt||now)}</DatabaseNameChanged><MaintenanceHistoryDays>365</MaintenanceHistoryDays><MemoryProtection><ProtectTitle>False</ProtectTitle><ProtectUserName>False</ProtectUserName><ProtectPassword>True</ProtectPassword><ProtectURL>False</ProtectURL><ProtectNotes>False</ProtectNotes></MemoryProtection><RecycleBinEnabled>False</RecycleBinEnabled><EntryTemplatesGroup>${bytesToBase64(ZERO_UUID)}</EntryTemplatesGroup><EntryTemplatesGroupChanged>${isoToKdbxTime(now)}</EntryTemplatesGroupChanged><LastSelectedGroup>${bytesToBase64(rootUuid)}</LastSelectedGroup><LastTopVisibleGroup>${bytesToBase64(rootUuid)}</LastTopVisibleGroup><CustomData><Item><Key>MeuCofre.Settings</Key><Value>${customSettings}</Value><LastModificationTime>${isoToKdbxTime(vault.updatedAt||now)}</LastModificationTime></Item></CustomData></Meta><Root><Group><UUID>${bytesToBase64(rootUuid)}</UUID><Name>${xmlEscape(vault.name||'Meu Cofre')}</Name><Notes></Notes><IconID>48</IconID>${timesXml(vault.createdAt||now,vault.updatedAt||now)}<IsExpanded>True</IsExpanded><DefaultAutoTypeSequence></DefaultAutoTypeSequence><EnableAutoType>null</EnableAutoType><EnableSearching>null</EnableSearching><LastTopVisibleEntry>${bytesToBase64(ZERO_UUID)}</LastTopVisibleEntry>${entries}</Group><DeletedObjects></DeletedObjects></Root></KeePassFile>`;
+  const rootXml=groupXml(root,groups,vault.entries||[],stream,4);
+  return `<?xml version="1.0" encoding="utf-8"?><KeePassFile><Meta><Generator>Meu Cofre ${APP_VERSION}</Generator><DatabaseName>${xmlEscape(vault.name||root.name||'Meu Cofre')}</DatabaseName><DatabaseNameChanged>${isoToKdbxTime(vault.updatedAt||now)}</DatabaseNameChanged><MaintenanceHistoryDays>365</MaintenanceHistoryDays><MemoryProtection><ProtectTitle>False</ProtectTitle><ProtectUserName>False</ProtectUserName><ProtectPassword>True</ProtectPassword><ProtectURL>False</ProtectURL><ProtectNotes>False</ProtectNotes></MemoryProtection><RecycleBinEnabled>False</RecycleBinEnabled><EntryTemplatesGroup>${bytesToBase64(ZERO_UUID)}</EntryTemplatesGroup><EntryTemplatesGroupChanged>${isoToKdbxTime(now)}</EntryTemplatesGroupChanged><LastSelectedGroup>${root.kdbxUuidBytes}</LastSelectedGroup><LastTopVisibleGroup>${root.kdbxUuidBytes}</LastTopVisibleGroup><CustomData><Item><Key>MeuCofre.Settings</Key><Value>${customSettings}</Value><LastModificationTime>${isoToKdbxTime(vault.updatedAt||now)}</LastModificationTime></Item></CustomData></Meta><Root>${rootXml}<DeletedObjects></DeletedObjects></Root></KeePassFile>`;
 }
 
 function readElementText(parent,selector,def=''){const el=parent.querySelector(selector);return el?.textContent??def;}
@@ -487,24 +509,32 @@ async function parseVaultXml(xmlBytes,innerAlg,innerKey,expectedHeaderHash=null)
     let settings={idleLockMinutes:5,backgroundLockSeconds:0,clipboardClearSeconds:20};
     const items=meta?Array.from(meta.querySelectorAll(':scope > CustomData > Item')):[];
     for(const item of items){if(readElementText(item,':scope > Key')==='MeuCofre.Settings'){try{settings={...settings,...JSON.parse(text(base64ToBytes(readElementText(item,':scope > Value'))))};}catch{}}}
-    const entries=[];
-    const walkGroup=(group)=>{
+    const entries=[],groups=[];
+    const walkGroup=(group,parentUuid=null,isRoot=false)=>{
+      const times=directChild(group,'Times');
+      const uuidB64=readElementText(group,':scope > UUID')||bytesToBase64(randomBytes(16));
+      const rec={
+        id:uuid(),kdbxUuidBytes:uuidB64,parentUuid:isRoot?null:parentUuid,
+        name:readElementText(group,':scope > Name',isRoot?name:'Pasta'),notes:readElementText(group,':scope > Notes',''),iconId:readElementText(group,':scope > IconID','48'),
+        isExpanded:String(readElementText(group,':scope > IsExpanded','True')).toLowerCase()!=='false',
+        enableAutoType:readElementText(group,':scope > EnableAutoType','null'),enableSearching:readElementText(group,':scope > EnableSearching','null'),defaultAutoTypeSequence:readElementText(group,':scope > DefaultAutoTypeSequence',''),
+        createdAt:kdbxTimeToIso(readElementText(times,':scope > CreationTime')),updatedAt:kdbxTimeToIso(readElementText(times,':scope > LastModificationTime')),isRoot:Boolean(isRoot)
+      };groups.push(rec);
       for(const entryEl of directChildren(group,'Entry')){
         const vals={}; for(const stringEl of directChildren(entryEl,'String')){const k=readElementText(stringEl,':scope > Key');const v=readElementText(stringEl,':scope > Value');vals[k]=v;}
-        const times=directChild(entryEl,'Times');const tags=(readElementText(entryEl,':scope > Tags')||'').split(';').map(s=>s.trim()).filter(Boolean);
-        const uuidB64=readElementText(entryEl,':scope > UUID');
+        const et=directChild(entryEl,'Times');const tags=(readElementText(entryEl,':scope > Tags')||'').split(';').map(s=>s.trim()).filter(Boolean);
+        const uuidE=readElementText(entryEl,':scope > UUID');
         entries.push({
-          id: uuid(), kdbxUuidBytes: uuidB64,
+          id:uuid(),kdbxUuidBytes:uuidE,groupUuid:uuidB64,
           title:vals.Title||'',username:vals.UserName||'',password:vals.Password||'',url:vals.URL||'',notes:vals.Notes||'',tags,
           totpSecret:totpSecretFromValues(vals),favorite:String(vals['MeuCofre-Favorite']||'').toLowerCase()==='true',
-          createdAt:kdbxTimeToIso(readElementText(times,':scope > CreationTime')),
-          updatedAt:kdbxTimeToIso(readElementText(times,':scope > LastModificationTime'))
+          createdAt:kdbxTimeToIso(readElementText(et,':scope > CreationTime')),updatedAt:kdbxTimeToIso(readElementText(et,':scope > LastModificationTime'))
         });
       }
-      for(const child of directChildren(group,'Group')) walkGroup(child);
-    }; walkGroup(rootGroup);
-    const now=new Date().toISOString();
-    return {schema:2,id:uuid(),name,createdAt:now,updatedAt:now,rootGroupUuid:readElementText(rootGroup,':scope > UUID')||bytesToBase64(randomBytes(16)),entries,settings};
+      for(const child of directChildren(group,'Group')) walkGroup(child,uuidB64,false);
+    };walkGroup(rootGroup,null,true);
+    const now=new Date().toISOString(),rootUuid=groups[0]?.kdbxUuidBytes||bytesToBase64(randomBytes(16));
+    return {schema:3,id:uuid(),name,createdAt:groups[0]?.createdAt||now,updatedAt:groups[0]?.updatedAt||now,rootGroupUuid:rootUuid,groups,entries,settings};
   }finally{stream?.destroy();}
 }
 
@@ -678,8 +708,30 @@ function entryChanged(entryEl,e){const vals={};for(const s of directChildren(ent
 function ensureHistory(entry){let h=directChild(entry,'History');if(!h){h=entry.ownerDocument.createElement('History');entry.append(h);}return h;}
 function createNewEntryElement(doc,e,major,protectedSet){const entry=doc.createElement('Entry'),id=randomBytes(16);e.kdbxUuidBytes=bytesToBase64(id);setDirectChildText(entry,'UUID',e.kdbxUuidBytes);setDirectChildText(entry,'IconID','0');setDirectChildText(entry,'ForegroundColor','');setDirectChildText(entry,'BackgroundColor','');setDirectChildText(entry,'OverrideURL','');setDirectChildText(entry,'Tags',(e.tags||[]).join(';'));const times=doc.createElement('Times'),now=e.createdAt||new Date().toISOString();for(const [n,v] of [['CreationTime',now],['LastModificationTime',e.updatedAt||now],['LastAccessTime',e.updatedAt||now],['ExpiryTime',e.updatedAt||now]])setDirectChildText(times,n,kdbxTimeForMajor(v,major));setDirectChildText(times,'Expires','False');setDirectChildText(times,'UsageCount','0');setDirectChildText(times,'LocationChanged',kdbxTimeForMajor(e.updatedAt||now,major));entry.append(times);setStringValue(entry,'Title',e.title,protectedSet);setStringValue(entry,'UserName',e.username,protectedSet);setStringValue(entry,'Password',e.password,protectedSet,{protect:true});setStringValue(entry,'URL',e.url,protectedSet);setStringValue(entry,'Notes',e.notes,protectedSet);if(e.totpSecret)setTotpValue(entry,e.totpSecret,protectedSet);if(e.favorite)setStringValue(entry,'MeuCofre-Favorite','True',protectedSet);const at=doc.createElement('AutoType');setDirectChildText(at,'Enabled','True');setDirectChildText(at,'DataTransferObfuscation','0');entry.append(at);wipe(id);return entry;}
 function addDeletedObject(doc,uuidB64,major){let deleted=doc.querySelector('KeePassFile > Root > DeletedObjects');if(!deleted){deleted=doc.createElement('DeletedObjects');doc.querySelector('KeePassFile > Root')?.append(deleted);}if(!deleted)return;const d=doc.createElement('DeletedObject');setDirectChildText(d,'UUID',uuidB64);setDirectChildText(d,'DeletionTime',kdbxTimeForMajor(new Date().toISOString(),major));deleted.append(d);}
-function patchDocumentFromVault(doc,vault,major,protectedSet){const current=new Map();for(const e of vault.entries||[]){if(e.kdbxUuidBytes)current.set(e.kdbxUuidBytes,e);}const live=Array.from(doc.querySelectorAll('Entry')).filter(e=>e.parentElement?.tagName==='Group');for(const entryEl of live){const uuidB64=readElementText(entryEl,':scope > UUID');const e=current.get(uuidB64);if(!e){addDeletedObject(doc,uuidB64,major);entryEl.remove();continue;}current.delete(uuidB64);if(entryChanged(entryEl,e))ensureHistory(entryEl).append(cloneEntryForHistory(entryEl,protectedSet));setStringValue(entryEl,'Title',e.title,protectedSet);setStringValue(entryEl,'UserName',e.username,protectedSet);setStringValue(entryEl,'Password',e.password,protectedSet,{protect:true});setStringValue(entryEl,'URL',e.url,protectedSet);setStringValue(entryEl,'Notes',e.notes,protectedSet);setDirectChildText(entryEl,'Tags',(e.tags||[]).join(';'));setTotpValue(entryEl,e.totpSecret,protectedSet);setStringValue(entryEl,'MeuCofre-Favorite',e.favorite?'True':'',protectedSet,{removeEmpty:true});const times=directChild(entryEl,'Times');if(times)setDirectChildText(times,'LastModificationTime',kdbxTimeForMajor(e.updatedAt||new Date().toISOString(),major));}
-  const rootGroup=doc.querySelector('KeePassFile > Root > Group');if(!rootGroup)throw new Error('KDBX sem grupo raiz.');for(const e of current.values())rootGroup.append(createNewEntryElement(doc,e,major,protectedSet));
+function createNewGroupElement(doc,g,major){
+  const group=doc.createElement('Group'),uuidB64=g.kdbxUuidBytes||bytesToBase64(randomBytes(16));g.kdbxUuidBytes=uuidB64;
+  setDirectChildText(group,'UUID',uuidB64);setDirectChildText(group,'Name',g.name||'Nova pasta');setDirectChildText(group,'Notes',g.notes||'');setDirectChildText(group,'IconID',g.iconId||'48');
+  const times=doc.createElement('Times'),now=g.createdAt||new Date().toISOString();for(const [n,v] of [['CreationTime',now],['LastModificationTime',g.updatedAt||now],['LastAccessTime',g.updatedAt||now],['ExpiryTime',g.updatedAt||now]])setDirectChildText(times,n,kdbxTimeForMajor(v,major));setDirectChildText(times,'Expires','False');setDirectChildText(times,'UsageCount','0');setDirectChildText(times,'LocationChanged',kdbxTimeForMajor(g.updatedAt||now,major));group.append(times);
+  setDirectChildText(group,'IsExpanded',g.isExpanded===false?'False':'True');setDirectChildText(group,'DefaultAutoTypeSequence',g.defaultAutoTypeSequence||'');setDirectChildText(group,'EnableAutoType',g.enableAutoType??'null');setDirectChildText(group,'EnableSearching',g.enableSearching??'null');setDirectChildText(group,'LastTopVisibleEntry',bytesToBase64(ZERO_UUID));return group;
+}
+function directDomGroups(doc){return Array.from(doc.querySelectorAll('KeePassFile > Root Group, KeePassFile > Root Group Group')).filter(g=>g.tagName==='Group');}
+function patchDocumentFromVault(doc,vault,major,protectedSet){
+  const rootGroup=doc.querySelector('KeePassFile > Root > Group');if(!rootGroup)throw new Error('KDBX sem grupo raiz.');
+  const {groups,root}=normalizeVaultGroups(vault);root.kdbxUuidBytes=readElementText(rootGroup,':scope > UUID')||root.kdbxUuidBytes;vault.rootGroupUuid=root.kdbxUuidBytes;
+  const desiredGroups=new Map(groups.map(g=>[g.kdbxUuidBytes,g]));desiredGroups.set(root.kdbxUuidBytes,root);
+  const domGroups=new Map();for(const g of Array.from(doc.querySelectorAll('Group'))){const u=readElementText(g,':scope > UUID');if(u)domGroups.set(u,g);}domGroups.set(root.kdbxUuidBytes,rootGroup);
+  // Create missing groups first, so entries and child groups always have a valid destination.
+  for(const g of groups){if(g.isRoot||domGroups.has(g.kdbxUuidBytes))continue;const el=createNewGroupElement(doc,g,major);domGroups.set(g.kdbxUuidBytes,el);const parent=domGroups.get(g.parentUuid)||rootGroup;parent.append(el);}
+  // Rename/move desired groups while preserving all unknown KeePassXC group fields.
+  for(const g of groups){const el=domGroups.get(g.kdbxUuidBytes);if(!el)continue;if(readElementText(el,':scope > Name')!==(g.name||'')){setDirectChildText(el,'Name',g.name||'Pasta');const times=directChild(el,'Times');if(times){const now=g.updatedAt||new Date().toISOString();setDirectChildText(times,'LastModificationTime',kdbxTimeForMajor(now,major));setDirectChildText(times,'LocationChanged',kdbxTimeForMajor(now,major));}}
+    if(!g.isRoot){const target=domGroups.get(g.parentUuid)||rootGroup;if(el.parentElement!==target&&target!==el&&!el.contains(target))target.append(el);}
+  }
+  // Remove only groups that are no longer represented by the app model. The UI only permits empty-group deletion.
+  for(const [u,el] of [...domGroups]){if(el===rootGroup||desiredGroups.has(u))continue;addDeletedObject(doc,u,major);el.remove();domGroups.delete(u);}
+  const current=new Map();for(const e of vault.entries||[]){if(e.kdbxUuidBytes)current.set(e.kdbxUuidBytes,e);}
+  const live=Array.from(doc.querySelectorAll('Entry')).filter(e=>e.parentElement?.tagName==='Group');
+  for(const entryEl of live){const uuidB64=readElementText(entryEl,':scope > UUID');const e=current.get(uuidB64);if(!e){addDeletedObject(doc,uuidB64,major);entryEl.remove();continue;}current.delete(uuidB64);if(entryChanged(entryEl,e))ensureHistory(entryEl).append(cloneEntryForHistory(entryEl,protectedSet));setStringValue(entryEl,'Title',e.title,protectedSet);setStringValue(entryEl,'UserName',e.username,protectedSet);setStringValue(entryEl,'Password',e.password,protectedSet,{protect:true});setStringValue(entryEl,'URL',e.url,protectedSet);setStringValue(entryEl,'Notes',e.notes,protectedSet);setDirectChildText(entryEl,'Tags',(e.tags||[]).join(';'));setTotpValue(entryEl,e.totpSecret,protectedSet);setStringValue(entryEl,'MeuCofre-Favorite',e.favorite?'True':'',protectedSet,{removeEmpty:true});const times=directChild(entryEl,'Times');if(times)setDirectChildText(times,'LastModificationTime',kdbxTimeForMajor(e.updatedAt||new Date().toISOString(),major));const target=domGroups.get(e.groupUuid)||rootGroup;if(entryEl.parentElement!==target)target.append(entryEl);}
+  for(const e of current.values()){const target=domGroups.get(e.groupUuid)||rootGroup;target.append(createNewEntryElement(doc,e,major,protectedSet));}
 }
 async function protectXmlDocument(doc,protectedSet,innerAlg,innerKey){let stream=null;if(innerAlg===0){if(protectedSet.size)throw new Error('Não é possível gravar valores protegidos sem stream interno.');}else if(innerAlg===2)stream=await innerSalsa(innerKey);else if(innerAlg===3)stream=await innerChaCha(innerKey);else throw new Error('Stream interno não suportado para gravação.');try{for(const el of Array.from(doc.querySelectorAll('Value'))){el.removeAttribute('MCProtected');if(!protectedSet.has(el))continue;const raw=utf8(el.textContent||''),enc=stream.xor(raw);el.textContent=bytesToBase64(enc);el.setAttribute('Protected','True');wipe(raw);wipe(enc);}}finally{stream?.destroy();}}
 function serializeXmlDocument(doc){let xml=new XMLSerializer().serializeToString(doc);if(!/^<\?xml/i.test(xml))xml='<?xml version="1.0" encoding="utf-8"?>'+xml;return utf8(xml);}
@@ -735,7 +787,7 @@ export function storedRecordBytes(record){if(record?.format!==KDBX_RECORD_FORMAT
 export function isKdbxRecord(record){return record?.format===KDBX_RECORD_FORMAT&&record.version===1&&typeof record.kdbx==='string';}
 
 export function defaultKdbxVault(name='Meu Cofre'){
-  const now=new Date().toISOString();return{schema:2,id:uuid(),name,createdAt:now,updatedAt:now,rootGroupUuid:bytesToBase64(randomBytes(16)),entries:[],settings:{idleLockMinutes:5,backgroundLockSeconds:0,clipboardClearSeconds:20}};
+  const now=new Date().toISOString(),rootGroupUuid=bytesToBase64(randomBytes(16));return{schema:3,id:uuid(),name,createdAt:now,updatedAt:now,rootGroupUuid,groups:[{id:uuid(),kdbxUuidBytes:rootGroupUuid,parentUuid:null,name,notes:'',iconId:'48',isExpanded:true,enableAutoType:'null',enableSearching:'null',defaultAutoTypeSequence:'',createdAt:now,updatedAt:now,isRoot:true}],entries:[],settings:{idleLockMinutes:5,backgroundLockSeconds:0,clipboardClearSeconds:20}};
 }
 
 function slotAad(slot){return utf8(`${AAD_PREFIX}:${slot.id}:${slot.role||'component'}:${slot.kind||'security-key'}`);}
@@ -849,4 +901,4 @@ export async function changeKdbxMasterPassword(record,session,newPassword){
   try{const next=await saveStoredKdbx(record,session.vault,components,session.publicMeta,session.kdbxInfo?.rounds);return {record:next,components:components.map(c=>c.slice())};} finally { wipe(pc); }
 }
 
-export function migrateLegacyVaultData(legacyVault){const now=new Date().toISOString();return{schema:2,id:legacyVault.id||uuid(),name:legacyVault.name||'Meu Cofre',createdAt:legacyVault.createdAt||now,updatedAt:now,rootGroupUuid:bytesToBase64(randomBytes(16)),entries:(legacyVault.entries||[]).map(e=>({...e,id:e.id||uuid(),kdbxUuidBytes:bytesToBase64(randomBytes(16))})),settings:{idleLockMinutes:legacyVault.settings?.idleLockMinutes??5,backgroundLockSeconds:legacyVault.settings?.backgroundLockSeconds??0,clipboardClearSeconds:legacyVault.settings?.clipboardClearSeconds??20}};}
+export function migrateLegacyVaultData(legacyVault){const now=new Date().toISOString(),rootGroupUuid=bytesToBase64(randomBytes(16));return{schema:3,id:legacyVault.id||uuid(),name:legacyVault.name||'Meu Cofre',createdAt:legacyVault.createdAt||now,updatedAt:now,rootGroupUuid,groups:[{id:uuid(),kdbxUuidBytes:rootGroupUuid,parentUuid:null,name:legacyVault.name||'Meu Cofre',notes:'',iconId:'48',isExpanded:true,enableAutoType:'null',enableSearching:'null',defaultAutoTypeSequence:'',createdAt:legacyVault.createdAt||now,updatedAt:now,isRoot:true}],entries:(legacyVault.entries||[]).map(e=>({...e,id:e.id||uuid(),kdbxUuidBytes:bytesToBase64(randomBytes(16)),groupUuid:rootGroupUuid})),settings:{idleLockMinutes:legacyVault.settings?.idleLockMinutes??5,backgroundLockSeconds:legacyVault.settings?.backgroundLockSeconds??0,clipboardClearSeconds:legacyVault.settings?.clipboardClearSeconds??20}};}

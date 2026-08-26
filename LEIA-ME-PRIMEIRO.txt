@@ -1,13 +1,5 @@
-MEU COFRE 1.8.1 — KDBX/KEEPASSXC + VERACRYPT + FIDO2 + MACOS
+MEU COFRE 1.9.0 — KDBX/KEEPASSXC + PASTAS + VERACRYPT + FIDO2 + MACOS
 
-Envie os arquivos desta pasta para a raiz do GitHub Pages, sem criar subpastas.
-Mantenha exatamente o mesmo domínio/origem HTTPS para preservar as credenciais WebAuthn já cadastradas.
+Novidade principal: KDBX importado preserva e exibe a arvore de grupos/pastas do KeePassXC. E possivel criar, renomear e mover pastas, mover entradas entre grupos e exportar novamente mantendo a base criptografica do arquivo original.
 
-Novo na 1.8:
-- importação KDBX 3.1/4.x preservada byte a byte;
-- AES, Twofish e ChaCha20; AES-KDF, Argon2d e Argon2id;
-- key files KeePassXC XML/raw/hex/arbitrários;
-- YubiKey FIDO2 alternativa por sidecar, sem regravar o KDBX externo.
-
-Limite: Challenge-Response HMAC-SHA1 do KeePassXC não é FIDO2 e continua exigindo integração nativa/KeePassXC.
-O helper VeraCrypt permanece no protocolo v1.7.0 porque essa parte não mudou.
+Para GitHub Pages, envie todos os arquivos desta pasta para a raiz do mesmo repositorio/origem HTTPS ja usada pelas YubiKeys.
