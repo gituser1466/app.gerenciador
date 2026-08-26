@@ -1,4 +1,4 @@
-MEU COFRE 1.8.0 — KDBX/KEEPASSXC + VERACRYPT + FIDO2 + MACOS
+MEU COFRE 1.8.1 — KDBX/KEEPASSXC + VERACRYPT + FIDO2 + MACOS
 
 Envie os arquivos desta pasta para a raiz do GitHub Pages, sem criar subpastas.
 Mantenha exatamente o mesmo domínio/origem HTTPS para preservar as credenciais WebAuthn já cadastradas.

@@ -120,6 +120,22 @@ function makeSession(key){
   }
   return{s,k:sub};
 }
+function encryptBlock(src,off,out,oo,c){
+  const [S1,S2,S3,S4]=c.s,kall=c.k;
+  let a=(load32(src,off)^kall[0])>>>0,b=(load32(src,off+4)^kall[1])>>>0,cw=(load32(src,off+8)^kall[2])>>>0,d=(load32(src,off+12)^kall[3])>>>0;
+  const g=x=>(S1[x&255]^S2[(x>>>8)&255]^S3[(x>>>16)&255]^S4[(x>>>24)&255])>>>0;
+  const g1=x=>(S2[x&255]^S3[(x>>>8)&255]^S4[(x>>>16)&255]^S1[(x>>>24)&255])>>>0;
+  for(let r=0;r<8;r++){
+    let t1=g(a),t2=g1(b),ko=8+r*4;
+    cw=rotr((cw^((t1+t2+kall[ko])>>>0))>>>0,1);
+    d=(rotl(d,1)^((t1+((2*t2)>>>0)+kall[ko+1])>>>0))>>>0;
+    t1=g(cw);t2=g1(d);
+    a=rotr((a^((t1+t2+kall[ko+2])>>>0))>>>0,1);
+    b=(rotl(b,1)^((t1+((2*t2)>>>0)+kall[ko+3])>>>0))>>>0;
+  }
+  store32(out,oo,(cw^kall[4])>>>0);store32(out,oo+4,(d^kall[5])>>>0);store32(out,oo+8,(a^kall[6])>>>0);store32(out,oo+12,(b^kall[7])>>>0);
+}
+
 function decryptBlock(src,off,out,oo,c){
   const [S1,S2,S3,S4]=c.s,kall=c.k;
   const ta=load32(src,off),tb=load32(src,off+4),tc=load32(src,off+8),td=load32(src,off+12);
@@ -138,6 +154,15 @@ function decryptBlock(src,off,out,oo,c){
   store32(out,oo,ia);store32(out,oo+4,ib);store32(out,oo+8,ic);store32(out,oo+12,id);
 }
 
+export function twofishCbcEncrypt(key,iv,plaintext){
+  if(!(iv instanceof Uint8Array)||iv.length!==16)throw new Error('IV Twofish inválido.');
+  if(!(plaintext instanceof Uint8Array))throw new Error('Plaintext Twofish inválido.');
+  const pad=16-(plaintext.length%16),input=new Uint8Array(plaintext.length+pad);input.set(plaintext);input.fill(pad,plaintext.length);
+  const sess=makeSession(key),out=new Uint8Array(input.length),block=new Uint8Array(16);let prev=iv;
+  for(let p=0;p<input.length;p+=16){for(let i=0;i<16;i++)block[i]=input[p+i]^prev[i];encryptBlock(block,0,out,p,sess);prev=out.subarray(p,p+16);}
+  input.fill(0);block.fill(0);for(const a of sess.s)a.fill(0);sess.k.fill(0);return out;
+}
+
 export function twofishCbcDecrypt(key,iv,ciphertext){
   if(!(iv instanceof Uint8Array)||iv.length!==16)throw new Error('IV Twofish inválido.');
   if(!(ciphertext instanceof Uint8Array)||!ciphertext.length||ciphertext.length%16)throw new Error('Ciphertext Twofish inválido.');
@@ -148,5 +173,7 @@ export function twofishCbcDecrypt(key,iv,ciphertext){
   let bad=0;for(let i=out.length-pad;i<out.length;i++)bad|=out[i]^pad;if(bad)throw new Error('Padding Twofish inválido.');
   const plain=out.slice(0,out.length-pad);out.fill(0);return plain;
 }
+
+export function twofishEncryptBlockForTest(key,block){const s=makeSession(key),out=new Uint8Array(16);encryptBlock(block,0,out,0,s);for(const a of s.s)a.fill(0);s.k.fill(0);return out;}
 
 export function twofishDecryptBlockForTest(key,block){const s=makeSession(key),out=new Uint8Array(16);decryptBlock(block,0,out,0,s);for(const a of s.s)a.fill(0);s.k.fill(0);return out;}
