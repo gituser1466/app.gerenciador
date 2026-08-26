@@ -10,7 +10,10 @@ function align(value, alignment = 16) {
 async function loadWasm() {
   if (!wasmPromise) {
     wasmPromise = (async () => {
-      const response = await fetch('./argon2-kdf.wasm', { cache: 'no-store' });
+      // Resolve pelo próprio módulo, não pela URL da página: assim funciona também
+      // quando o importador está em outra pasta (páginas de teste, subrotas).
+      const wasmUrl = new URL('./argon2-kdf.wasm', import.meta.url);
+      const response = await fetch(wasmUrl, { cache: 'no-store' });
       if (!response.ok) throw new Error(`Não foi possível carregar Argon2 (${response.status}).`);
       const bytes = await response.arrayBuffer();
       const { instance } = await WebAssembly.instantiate(bytes, {});

@@ -107,3 +107,36 @@ export function clampInt(value, min, max, fallback) {
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(max, Math.max(min, parsed));
 }
+
+/**
+ * Entrega um arquivo ao usuário. No iPhone/iPad a folha de compartilhamento do
+ * iOS ("Salvar em Arquivos") é bem mais confiável que um <a download> dentro de
+ * uma PWA em modo standalone; no macOS o download normal é o comportamento
+ * esperado. Qualquer falha cai de volta no download.
+ */
+export async function saveBlob(blob, filename) {
+  const touch = typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches;
+  if (touch && typeof File === 'function' && navigator.canShare) {
+    try {
+      const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: filename });
+        return 'share';
+      }
+    } catch (error) {
+      if (error?.name === 'AbortError') return 'cancel';
+    }
+  }
+  downloadBlob(blob, filename);
+  return 'download';
+}
+
+/** Tamanho legível para anexos e containers. */
+export function formatBytes(value) {
+  const n = Number(value) || 0;
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = n / 1024, i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v >= 10 ? v.toFixed(1) : v.toFixed(2)} ${units[i]}`;
+}

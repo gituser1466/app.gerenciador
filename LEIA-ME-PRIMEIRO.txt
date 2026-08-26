@@ -1,5 +1,22 @@
-MEU COFRE 1.9.0 — KDBX/KEEPASSXC + PASTAS + VERACRYPT + FIDO2 + MACOS
+MEU COFRE 1.9.1 - INTERFACE macOS/iOS + COMPATIBILIDADE AMPLIADA
 
-Novidade principal: KDBX importado preserva e exibe a arvore de grupos/pastas do KeePassXC. E possivel criar, renomear e mover pastas, mover entradas entre grupos e exportar novamente mantendo a base criptografica do arquivo original.
+Correcao critica: a versao 1.9.0 nao abria. Havia um erro de sintaxe em app.js
+(uma template string sem fechar) que derrubava o modulo inteiro e deixava a tela
+em branco. Corrigido.
 
-Para GitHub Pages, envie todos os arquivos desta pasta para a raiz do mesmo repositorio/origem HTTPS ja usada pelas YubiKeys.
+Novidades principais desta versao:
+- Interface redesenhada na linguagem do macOS (toolbar unificada, source list,
+  sheets) com modo claro/escuro seguindo o sistema, e layout iOS nativo com tab
+  bar, listas agrupadas e folhas inferiores no iPhone/iPad.
+- KDBX: campos personalizados, anexos, expiracao e TOTP em todos os formatos do
+  KeePassXC. Criacao com Argon2id (padrao do KeePassXC), Argon2d ou AES-KDF.
+- VeraCrypt: alem de AES, agora abre Serpent, Twofish e as cascatas formadas por
+  esses tres, com PBKDF2 SHA-512, SHA-256, Whirlpool e BLAKE2s-256.
+- Volumes formatados em Mac OS Extended (HFS+/HFSX) passam a ser navegaveis, que
+  e o padrao do VeraCrypt no macOS.
+- Dois bugs de perda de dados corrigidos: itens novos criados dentro de um KDBX
+  importado nao eram gravados, e valores protegidos saiam corrompidos quando um
+  grupo tinha entradas e subgrupos ao mesmo tempo.
+
+Para GitHub Pages, envie todos os arquivos desta pasta para a raiz do mesmo
+repositorio/origem HTTPS ja usada pelas YubiKeys.

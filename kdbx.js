@@ -31,7 +31,7 @@ const KDF_ARGON2ID = hex('9E298B1956DB4773B23DFC3EC6F0A1E6');
 const ZERO_UUID = new Uint8Array(16);
 const EPOCH_0001_TO_1970 = 62135596800n;
 const PUBLIC_SCHEMA = 1;
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.9.1';
 const BLOCK_SIZE = 1024 * 1024;
 const MAX_FILE_BYTES = 128 * 1024 * 1024;
 const MAX_XML_BYTES = 128 * 1024 * 1024;
@@ -40,8 +40,20 @@ const MAX_PUBLIC_SLOTS = 24;
 const DEFAULT_AES_ROUNDS = 180000;
 const MIN_AES_ROUNDS = 50000;
 const MAX_AES_ROUNDS_CREATE = 2000000;
-const AES_KDF_YIELD_EVERY = 25000;
+const AES_KDF_YIELD_EVERY = 150000;
 const AAD_PREFIX = 'MeuCofre-KDBX-v1';
+const MAX_ATTACHMENT_BYTES = 32 * 1024 * 1024;
+const MAX_ATTACHMENTS_PER_ENTRY = 64;
+const MAX_CUSTOM_FIELDS = 128;
+// Padrões do KeePassXC 2.7 para Argon2 (KDBX 4).
+const ARGON2_DEFAULTS = Object.freeze({ iterations: 2, memoryBytes: 64 * 1024 * 1024, parallelism: 2, version: 0x13 });
+// Chaves <String> que o Meu Cofre já mostra em campos próprios; o resto vira
+// "campo personalizado" e volta ao KDBX exatamente com a mesma chave.
+const RESERVED_STRING_KEYS = Object.freeze(new Set([
+  'Title', 'UserName', 'Password', 'URL', 'Notes',
+  'otp', 'TimeOtp-Secret-Base32', 'TimeOtp-Length', 'TimeOtp-Period', 'TimeOtp-Algorithm',
+  'TOTP Seed', 'TOTP Settings', 'MeuCofre-Favorite'
+]));
 
 function hex(value) {
   const out = new Uint8Array(value.length / 2);
@@ -299,22 +311,102 @@ function aesEncryptBlock(block, expanded) {
 
 export function aes256BlockForTest(key, block) { const e=aesExpandKey(key); try{return aesEncryptBlock(block,e);}finally{wipe(e);} }
 
+// AES-KDF acelerado por T-tables. O KeePassXC grava KDBX 3.1 com 1.000.000 de
+// rodadas por padrão; a versão byte a byte acima levava mais de 10 s por
+// desbloqueio num Mac (e muito mais num iPhone). As tabelas são as mesmas do
+// AES de referência usado por KeePassXC/OpenSSL: trocam resistência teórica a
+// ataques de cache — irrelevante aqui, já que o alvo é a própria aba — por uma
+// derivação cerca de dez vezes mais rápida.
+let AES_TE = null;
+function aesTables() {
+  if (AES_TE) return AES_TE;
+  const te0 = new Uint32Array(256), te1 = new Uint32Array(256), te2 = new Uint32Array(256), te3 = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    const sx = SBOX[i], s2 = xtime(sx), s3 = s2 ^ sx;
+    te0[i] = ((s2 << 24) | (sx << 16) | (sx << 8) | s3) >>> 0;
+    te1[i] = ((s3 << 24) | (s2 << 16) | (sx << 8) | sx) >>> 0;
+    te2[i] = ((sx << 24) | (s3 << 16) | (s2 << 8) | sx) >>> 0;
+    te3[i] = ((sx << 24) | (sx << 16) | (s3 << 8) | s2) >>> 0;
+  }
+  AES_TE = { te0, te1, te2, te3 };
+  return AES_TE;
+}
+/** Chave expandida como 60 palavras de 32 bits big-endian. */
+function aesExpandKeyWords(key) {
+  const bytes = aesExpandKey(key);
+  const words = new Uint32Array(60);
+  for (let i = 0; i < 60; i++) {
+    const o = i * 4;
+    words[i] = ((bytes[o] << 24) | (bytes[o + 1] << 16) | (bytes[o + 2] << 8) | bytes[o + 3]) >>> 0;
+  }
+  wipe(bytes);
+  return words;
+}
+function aesEncryptWords(state, rk, t) {
+  const { te0, te1, te2, te3 } = aesTables();
+  let s0 = (state[0] ^ rk[0]) >>> 0, s1 = (state[1] ^ rk[1]) >>> 0, s2 = (state[2] ^ rk[2]) >>> 0, s3 = (state[3] ^ rk[3]) >>> 0;
+  let k = 4;
+  for (let round = 1; round <= 13; round++) {
+    t[0] = (te0[(s0 >>> 24) & 255] ^ te1[(s1 >>> 16) & 255] ^ te2[(s2 >>> 8) & 255] ^ te3[s3 & 255] ^ rk[k]) >>> 0;
+    t[1] = (te0[(s1 >>> 24) & 255] ^ te1[(s2 >>> 16) & 255] ^ te2[(s3 >>> 8) & 255] ^ te3[s0 & 255] ^ rk[k + 1]) >>> 0;
+    t[2] = (te0[(s2 >>> 24) & 255] ^ te1[(s3 >>> 16) & 255] ^ te2[(s0 >>> 8) & 255] ^ te3[s1 & 255] ^ rk[k + 2]) >>> 0;
+    t[3] = (te0[(s3 >>> 24) & 255] ^ te1[(s0 >>> 16) & 255] ^ te2[(s1 >>> 8) & 255] ^ te3[s2 & 255] ^ rk[k + 3]) >>> 0;
+    s0 = t[0]; s1 = t[1]; s2 = t[2]; s3 = t[3];
+    k += 4;
+  }
+  state[0] = (((SBOX[(s0 >>> 24) & 255] << 24) | (SBOX[(s1 >>> 16) & 255] << 16) | (SBOX[(s2 >>> 8) & 255] << 8) | SBOX[s3 & 255]) ^ rk[56]) >>> 0;
+  state[1] = (((SBOX[(s1 >>> 24) & 255] << 24) | (SBOX[(s2 >>> 16) & 255] << 16) | (SBOX[(s3 >>> 8) & 255] << 8) | SBOX[s0 & 255]) ^ rk[57]) >>> 0;
+  state[2] = (((SBOX[(s2 >>> 24) & 255] << 24) | (SBOX[(s3 >>> 16) & 255] << 16) | (SBOX[(s0 >>> 8) & 255] << 8) | SBOX[s1 & 255]) ^ rk[58]) >>> 0;
+  state[3] = (((SBOX[(s3 >>> 24) & 255] << 24) | (SBOX[(s0 >>> 16) & 255] << 16) | (SBOX[(s1 >>> 8) & 255] << 8) | SBOX[s2 & 255]) ^ rk[59]) >>> 0;
+}
+function bytesToWords(bytes, offset, words, at) {
+  for (let i = 0; i < 4; i++) {
+    const o = offset + i * 4;
+    words[at + i] = ((bytes[o] << 24) | (bytes[o + 1] << 16) | (bytes[o + 2] << 8) | bytes[o + 3]) >>> 0;
+  }
+}
+function wordsToBytes(words, at, bytes, offset) {
+  for (let i = 0; i < 4; i++) {
+    const v = words[at + i], o = offset + i * 4;
+    bytes[o] = (v >>> 24) & 255; bytes[o + 1] = (v >>> 16) & 255; bytes[o + 2] = (v >>> 8) & 255; bytes[o + 3] = v & 255;
+  }
+}
+
+export function aes256BlockTableForTest(key, block) {
+  const rk = aesExpandKeyWords(key), state = new Uint32Array(4), t = new Uint32Array(4);
+  try {
+    bytesToWords(block, 0, state, 0);
+    aesEncryptWords(state, rk, t);
+    const out = new Uint8Array(16);
+    wordsToBytes(state, 0, out, 0);
+    return out;
+  } finally { wipe(rk); wipe(state); wipe(t); }
+}
+
 async function aesKdf(composite, seed, rounds) {
   rounds = Number(rounds);
   if (!Number.isSafeInteger(rounds) || rounds < 1) throw new Error('Quantidade de rodadas AES-KDF inválida.');
-  const expanded = aesExpandKey(seed);
-  const a = composite.slice(0,16), b = composite.slice(16,32), temp = new Uint8Array(16);
+  const rk = aesExpandKeyWords(seed);
+  const a = new Uint32Array(4), b = new Uint32Array(4), t = new Uint32Array(4);
+  const buffer = new Uint8Array(32);
   try {
-    for (let i=0;i<rounds;i++) {
-      aesEncryptBlockInPlace(a,expanded,temp); aesEncryptBlockInPlace(b,expanded,temp);
+    bytesToWords(composite, 0, a, 0);
+    bytesToWords(composite, 16, b, 0);
+    for (let i = 0; i < rounds; i++) {
+      aesEncryptWords(a, rk, t);
+      aesEncryptWords(b, rk, t);
       if (i && i % AES_KDF_YIELD_EVERY === 0) await new Promise(resolve => setTimeout(resolve, 0));
     }
-    return await sha256(concatBytes(a,b));
-  } finally { wipe(expanded); wipe(a); wipe(b); wipe(temp); }
+    wordsToBytes(a, 0, buffer, 0);
+    wordsToBytes(b, 0, buffer, 16);
+    return await sha256(buffer);
+  } finally { wipe(rk); wipe(a); wipe(b); wipe(t); wipe(buffer); }
 }
 
 export async function calibrateAesKdf(targetMs = 1000) {
-  const seed = randomBytes(32), c=randomBytes(32); const probe=3000; const start=performance.now();
+  // Sonda grande o suficiente para medir com precisão agora que o AES-KDF usa
+  // T-tables; com 3.000 rodadas o tempo caía abaixo da resolução do relógio.
+  const seed = randomBytes(32), c=randomBytes(32); const probe=200000; const start=performance.now();
   try { await aesKdf(c,seed,probe); } finally { wipe(seed); wipe(c); }
   const elapsed=Math.max(10,performance.now()-start);
   const estimate=Math.round(probe*(targetMs/elapsed));
@@ -432,12 +524,13 @@ function protectedXmlValue(value, stream) {
   const raw=utf8(value||''); const enc=stream.xor(raw); wipe(raw); const b64=bytesToBase64(enc); wipe(enc); return `<Value Protected="True">${b64}</Value>`;
 }
 
-function timesXml(created,modified) {
+function timesXml(created,modified,expires=false,expiryTime=null) {
   const c=isoToKdbxTime(created),m=isoToKdbxTime(modified||created),now=isoToKdbxTime(new Date().toISOString());
-  return `<Times><CreationTime>${c}</CreationTime><LastModificationTime>${m}</LastModificationTime><LastAccessTime>${now}</LastAccessTime><ExpiryTime>${now}</ExpiryTime><Expires>False</Expires><UsageCount>0</UsageCount><LocationChanged>${m}</LocationChanged></Times>`;
+  const exp=expires&&expiryTime?isoToKdbxTime(expiryTime):now;
+  return `<Times><CreationTime>${c}</CreationTime><LastModificationTime>${m}</LastModificationTime><LastAccessTime>${now}</LastAccessTime><ExpiryTime>${exp}</ExpiryTime><Expires>${expires?'True':'False'}</Expires><UsageCount>0</UsageCount><LocationChanged>${m}</LocationChanged></Times>`;
 }
 
-function entryXml(entry,stream){
+function entryXml(entry,stream,allocate=null){
   const id=entry.kdbxUuidBytes?base64ToBytes(entry.kdbxUuidBytes):uuidBytesFromString(entry.id); entry.kdbxUuidBytes=bytesToBase64(id);
   const strings=[];
   const plain=(k,v)=>strings.push(`<String><Key>${xmlEscape(k)}</Key><Value>${xmlEscape(v||'')}</Value></String>`);
@@ -445,7 +538,21 @@ function entryXml(entry,stream){
   plain('Title',entry.title);plain('UserName',entry.username);prot('Password',entry.password);plain('URL',entry.url);plain('Notes',entry.notes);
   if(entry.totpSecret){prot('TimeOtp-Secret-Base32',entry.totpSecret);plain('TimeOtp-Length','6');plain('TimeOtp-Period','30');plain('TimeOtp-Algorithm','HMAC-SHA-1');}
   if(entry.favorite) plain('MeuCofre-Favorite','True');
-  return `<Entry><UUID>${bytesToBase64(id)}</UUID><IconID>0</IconID><ForegroundColor></ForegroundColor><BackgroundColor></BackgroundColor><OverrideURL></OverrideURL><Tags>${xmlEscape((entry.tags||[]).join(';'))}</Tags>${timesXml(entry.createdAt,entry.updatedAt)}${strings.join('')}<AutoType><Enabled>True</Enabled><DataTransferObfuscation>0</DataTransferObfuscation></AutoType></Entry>`;
+  for(const field of (entry.fields||[]).slice(0,MAX_CUSTOM_FIELDS)){
+    const key=String(field.key||'').trim();
+    if(!key||RESERVED_STRING_KEYS.has(key))continue;
+    if(field.protected)prot(key,field.value);else plain(key,field.value);
+  }
+  const binaries=[];
+  for(const item of (entry.attachments||[]).slice(0,MAX_ATTACHMENTS_PER_ENTRY)){
+    const key=String(item.key||'').trim();
+    if(!key)continue;
+    const ref=allocate?allocate(item):null;
+    if(ref===null||ref===undefined)continue;
+    item.ref=ref;
+    binaries.push(`<Binary><Key>${xmlEscape(key)}</Key><Value Ref="${ref}"/></Binary>`);
+  }
+  return `<Entry><UUID>${bytesToBase64(id)}</UUID><IconID>${xmlEscape(entry.iconId||'0')}</IconID><ForegroundColor></ForegroundColor><BackgroundColor></BackgroundColor><OverrideURL></OverrideURL><Tags>${xmlEscape((entry.tags||[]).join(';'))}</Tags>${timesXml(entry.createdAt,entry.updatedAt,entry.expires,entry.expiryTime)}${strings.join('')}${binaries.join('')}<AutoType><Enabled>True</Enabled><DataTransferObfuscation>0</DataTransferObfuscation></AutoType></Entry>`;
 }
 
 function normalizeVaultGroups(vault){
@@ -462,20 +569,23 @@ function normalizeVaultGroups(vault){
   for(const e of vault.entries||[])if(!e.groupUuid||!valid.has(e.groupUuid))e.groupUuid=root.kdbxUuidBytes;
   vault.groups=groups;return{groups,root};
 }
-function groupXml(group,groups,entries,stream,major=4){
+function groupXml(group,groups,entries,stream,major=4,allocate=null){
   const uuidB64=group.kdbxUuidBytes||bytesToBase64(randomBytes(16));group.kdbxUuidBytes=uuidB64;
-  const children=groups.filter(g=>!g.isRoot&&g.parentUuid===uuidB64).map(g=>groupXml(g,groups,entries,stream,major)).join('');
-  const ownEntries=entries.filter(e=>e.groupUuid===uuidB64).map(e=>entryXml(e,stream)).join('');
+  // As entradas do próprio grupo vêm ANTES dos subgrupos no XML, então precisam
+  // consumir o stream de proteção primeiro. Gerar os filhos antes desalinhava
+  // Salsa20/ChaCha20 e embaralhava senha, TOTP e campos protegidos.
+  const ownEntries=entries.filter(e=>e.groupUuid===uuidB64).map(e=>entryXml(e,stream,allocate)).join('');
+  const children=groups.filter(g=>!g.isRoot&&g.parentUuid===uuidB64).map(g=>groupXml(g,groups,entries,stream,major,allocate)).join('');
   const created=group.createdAt||new Date().toISOString(),modified=group.updatedAt||created;
   const exp=group.isExpanded===false?'False':'True';
   const ena=(group.enableAutoType===true||group.enableAutoType==='True')?'True':(group.enableAutoType===false||group.enableAutoType==='False')?'False':'null';
   const ens=(group.enableSearching===true||group.enableSearching==='True')?'True':(group.enableSearching===false||group.enableSearching==='False')?'False':'null';
   return `<Group><UUID>${uuidB64}</UUID><Name>${xmlEscape(group.name||'Pasta')}</Name><Notes>${xmlEscape(group.notes||'')}</Notes><IconID>${xmlEscape(group.iconId||'48')}</IconID>${timesXml(created,modified)}<IsExpanded>${exp}</IsExpanded><DefaultAutoTypeSequence>${xmlEscape(group.defaultAutoTypeSequence||'')}</DefaultAutoTypeSequence><EnableAutoType>${ena}</EnableAutoType><EnableSearching>${ens}</EnableSearching><LastTopVisibleEntry>${bytesToBase64(ZERO_UUID)}</LastTopVisibleEntry>${ownEntries}${children}</Group>`;
 }
-function buildVaultXml(vault,stream){
+function buildVaultXml(vault,stream,allocate=null){
   const now=new Date().toISOString();const {groups,root}=normalizeVaultGroups(vault);
   const customSettings=bytesToBase64(utf8(JSON.stringify(vault.settings||{})));
-  const rootXml=groupXml(root,groups,vault.entries||[],stream,4);
+  const rootXml=groupXml(root,groups,vault.entries||[],stream,4,allocate);
   return `<?xml version="1.0" encoding="utf-8"?><KeePassFile><Meta><Generator>Meu Cofre ${APP_VERSION}</Generator><DatabaseName>${xmlEscape(vault.name||root.name||'Meu Cofre')}</DatabaseName><DatabaseNameChanged>${isoToKdbxTime(vault.updatedAt||now)}</DatabaseNameChanged><MaintenanceHistoryDays>365</MaintenanceHistoryDays><MemoryProtection><ProtectTitle>False</ProtectTitle><ProtectUserName>False</ProtectUserName><ProtectPassword>True</ProtectPassword><ProtectURL>False</ProtectURL><ProtectNotes>False</ProtectNotes></MemoryProtection><RecycleBinEnabled>False</RecycleBinEnabled><EntryTemplatesGroup>${bytesToBase64(ZERO_UUID)}</EntryTemplatesGroup><EntryTemplatesGroupChanged>${isoToKdbxTime(now)}</EntryTemplatesGroupChanged><LastSelectedGroup>${root.kdbxUuidBytes}</LastSelectedGroup><LastTopVisibleGroup>${root.kdbxUuidBytes}</LastTopVisibleGroup><CustomData><Item><Key>MeuCofre.Settings</Key><Value>${customSettings}</Value><LastModificationTime>${isoToKdbxTime(vault.updatedAt||now)}</LastModificationTime></Item></CustomData></Meta><Root>${rootXml}<DeletedObjects></DeletedObjects></Root></KeePassFile>`;
 }
 
@@ -485,9 +595,43 @@ function directChildren(parent,name){return Array.from(parent.children||[]).filt
 
 function totpSecretFromValues(vals){
   const direct=vals['TimeOtp-Secret-Base32']||'';if(direct)return String(direct).replace(/\s+/g,'').toUpperCase();
+  // KeePassXC 2.5 e anteriores guardavam o segredo em "TOTP Seed".
+  const legacySeed=String(vals['TOTP Seed']||'').trim();
+  if(legacySeed)return legacySeed.replace(/\s+/g,'').replace(/=+$/,'').toUpperCase();
   const otp=String(vals.otp||'').trim();if(!otp)return '';
   if(/^otpauth:\/\//i.test(otp)){try{return String(new URL(otp).searchParams.get('secret')||'').replace(/\s+/g,'').toUpperCase();}catch{return '';}}
   return /^[A-Z2-7]+=*$/i.test(otp.replace(/\s+/g,''))?otp.replace(/\s+/g,'').replace(/=+$/,'').toUpperCase():'';
+}
+
+/** Campos <String> que não são os básicos — é o que o KeePassXC chama de atributo. */
+function readCustomFields(entryEl){
+  const out=[];
+  for(const stringEl of directChildren(entryEl,'String')){
+    const key=readElementText(stringEl,':scope > Key');
+    if(!key||RESERVED_STRING_KEYS.has(key))continue;
+    const valueEl=directChild(stringEl,'Value');
+    out.push({key,value:valueEl?.textContent??'',protected:valueEl?.getAttribute('Protected')==='True'||valueEl?.hasAttribute('MCProtected')});
+    if(out.length>=MAX_CUSTOM_FIELDS)break;
+  }
+  return out;
+}
+/** <Binary><Key>nome</Key><Value Ref="n"/></Binary> — o dado fica no pool do KDBX. */
+function readAttachments(entryEl){
+  const out=[];
+  for(const binEl of directChildren(entryEl,'Binary')){
+    const key=readElementText(binEl,':scope > Key');
+    const valueEl=directChild(binEl,'Value');
+    if(!key||!valueEl)continue;
+    const ref=valueEl.getAttribute('Ref');
+    out.push({key,ref:ref===null?null:Number(ref),size:null,data:null,inlineBase64:ref===null?(valueEl.textContent||'').replace(/\s+/g,''):null});
+    if(out.length>=MAX_ATTACHMENTS_PER_ENTRY)break;
+  }
+  return out;
+}
+function readEntryExpiry(timesEl){
+  const expires=String(readElementText(timesEl,':scope > Expires','False')).toLowerCase()==='true';
+  const raw=readElementText(timesEl,':scope > ExpiryTime','');
+  return {expires,expiryTime:expires&&raw?kdbxTimeToIso(raw):null};
 }
 
 async function parseVaultXml(xmlBytes,innerAlg,innerKey,expectedHeaderHash=null){
@@ -528,13 +672,18 @@ async function parseVaultXml(xmlBytes,innerAlg,innerKey,expectedHeaderHash=null)
           id:uuid(),kdbxUuidBytes:uuidE,groupUuid:uuidB64,
           title:vals.Title||'',username:vals.UserName||'',password:vals.Password||'',url:vals.URL||'',notes:vals.Notes||'',tags,
           totpSecret:totpSecretFromValues(vals),favorite:String(vals['MeuCofre-Favorite']||'').toLowerCase()==='true',
+          fields:readCustomFields(entryEl),attachments:readAttachments(entryEl),
+          iconId:readElementText(entryEl,':scope > IconID','0'),
+          ...readEntryExpiry(et),
+          historyCount:directChildren(directChild(entryEl,'History')||{children:[]},'Entry').length,
           createdAt:kdbxTimeToIso(readElementText(et,':scope > CreationTime')),updatedAt:kdbxTimeToIso(readElementText(et,':scope > LastModificationTime'))
         });
       }
       for(const child of directChildren(group,'Group')) walkGroup(child,uuidB64,false);
     };walkGroup(rootGroup,null,true);
     const now=new Date().toISOString(),rootUuid=groups[0]?.kdbxUuidBytes||bytesToBase64(randomBytes(16));
-    return {schema:3,id:uuid(),name,createdAt:groups[0]?.createdAt||now,updatedAt:groups[0]?.updatedAt||now,rootGroupUuid:rootUuid,groups,entries,settings};
+    const vault={schema:3,id:uuid(),name,createdAt:groups[0]?.createdAt||now,updatedAt:groups[0]?.updatedAt||now,rootGroupUuid:rootUuid,groups,entries,settings};
+    return {vault,legacyBinaries:await collectLegacyBinaries(doc)};
   }finally{stream?.destroy();}
 }
 
@@ -567,6 +716,17 @@ function dictToPublicMeta(bytes){
 }
 
 function kdfToDict(seed,rounds){return variantDict([{name:'$UUID',type:0x42,value:KDF_AES},{name:'S',type:0x42,value:seed},{name:'R',type:0x05,value:BigInt(rounds)}]);}
+export const KDF_CHOICES = Object.freeze(['argon2id','argon2d','aes']);
+function argon2ToDict(salt,params,argon2id){
+  return variantDict([
+    {name:'$UUID',type:0x42,value:argon2id?KDF_ARGON2ID:KDF_ARGON2D},
+    {name:'S',type:0x42,value:salt},
+    {name:'I',type:0x05,value:BigInt(params.iterations)},
+    {name:'M',type:0x05,value:BigInt(params.memoryBytes)},
+    {name:'P',type:0x04,value:params.parallelism},
+    {name:'V',type:0x04,value:params.version}
+  ]);
+}
 function parseKdf(bytes){
   const d=parseVariantDict(bytes);const uuid=d.get('$UUID')?.raw;
   if(!uuid||uuid.length!==16)throw new Error('KDBX sem UUID válido da KDF.');
@@ -670,7 +830,36 @@ async function hashedBlockStreamV3(data){
   parts.push(u32(index),new Uint8Array(32),u32(0));return concatBytes(...parts);
 }
 
-function parseInnerHeader(bytes){let p=0,innerAlg=null,innerKey=null;while(p+5<=bytes.length){const id=bytes[p++],len=readI32(bytes,p);p+=4;if(len<0||p+len>bytes.length)throw new Error('Cabeçalho interno KDBX inválido.');const value=bytes.slice(p,p+len);p+=len;if(id===0){if(len!==0)throw new Error('Final do cabeçalho interno inválido.');return{innerAlg,innerKey,xmlOffset:p,headerBytes:bytes.slice(0,p)};}if(id===1){if(len!==4)throw new Error('Algoritmo interno inválido.');innerAlg=readI32(value,0);}else if(id===2)innerKey=value;}throw new Error('Cabeçalho interno KDBX incompleto.');}
+function parseInnerHeader(bytes){
+  let p=0,innerAlg=null,innerKey=null;const binaries=[];
+  while(p+5<=bytes.length){
+    const id=bytes[p++],len=readI32(bytes,p);p+=4;
+    if(len<0||p+len>bytes.length)throw new Error('Cabeçalho interno KDBX inválido.');
+    const value=bytes.slice(p,p+len);p+=len;
+    if(id===0){if(len!==0)throw new Error('Final do cabeçalho interno inválido.');return{innerAlg,innerKey,binaries,xmlOffset:p,headerBytes:bytes.slice(0,p)};}
+    if(id===1){if(len!==4)throw new Error('Algoritmo interno inválido.');innerAlg=readI32(value,0);}
+    else if(id===2)innerKey=value;
+    // id 3 = binário anexado (1 byte de flags + conteúdo). A ordem define o Ref.
+    else if(id===3){if(len<1)throw new Error('Binário interno KDBX inválido.');binaries.push({flags:value[0],data:value.slice(1)});}
+  }
+  throw new Error('Cabeçalho interno KDBX incompleto.');
+}
+/** Pool de binários do KDBX 3.1: <Meta><Binaries><Binary ID=".." Compressed=".."> */
+async function collectLegacyBinaries(doc){
+  const map=new Map();
+  const nodes=doc?doc.querySelectorAll('KeePassFile > Meta > Binaries > Binary'):[];
+  for(const node of nodes){
+    const id=node.getAttribute('ID');
+    if(id===null)continue;
+    let bytes;
+    try{bytes=base64ToBytes((node.textContent||'').replace(/\s+/g,''));}catch{continue;}
+    if(String(node.getAttribute('Compressed')).toLowerCase()==='true'){
+      try{bytes=await maybeDecompress(bytes,1);}catch{continue;}
+    }
+    map.set(Number(id),bytes);
+  }
+  return map;
+}
 
 function rewriteHeaderV4(headerBytes,replacements){
   const parts=[headerBytes.slice(0,12)];let p=12;
@@ -682,9 +871,21 @@ function rewriteHeaderV3(headerBytes,replacements){
   while(p+3<=headerBytes.length){const id=headerBytes[p++],len=readU16(headerBytes,p);p+=2;if(p+len>headerBytes.length)throw new Error('Cabeçalho KDBX 3.1 inválido durante gravação.');let value=headerBytes.slice(p,p+len);p+=len;if(replacements.has(id))value=replacements.get(id);if(value.length>0xffff)throw new Error('Campo KDBX 3.1 grande demais.');parts.push(new Uint8Array([id]),u16(value.length),value);if(id===0)break;}
   return concatBytes(...parts);
 }
-function rewriteInnerHeader(headerBytes,newKey){
+function rewriteInnerHeader(headerBytes,newKey,extraBinaries=[]){
   const parts=[];let p=0,seenKey=false;
-  while(p+5<=headerBytes.length){const id=headerBytes[p++],len=readI32(headerBytes,p);p+=4;if(len<0||p+len>headerBytes.length)throw new Error('Cabeçalho interno KDBX inválido durante gravação.');let value=headerBytes.slice(p,p+len);p+=len;if(id===2){value=newKey;seenKey=true;}parts.push(new Uint8Array([id]),i32(value.length),value);if(id===0)break;}
+  while(p+5<=headerBytes.length){
+    const id=headerBytes[p++],len=readI32(headerBytes,p);p+=4;
+    if(len<0||p+len>headerBytes.length)throw new Error('Cabeçalho interno KDBX inválido durante gravação.');
+    let value=headerBytes.slice(p,p+len);p+=len;
+    if(id===2){value=newKey;seenKey=true;}
+    if(id===0){
+      // Binários novos entram antes do marcador final, mantendo a ordem dos Refs.
+      for(const bin of extraBinaries)parts.push(new Uint8Array([3]),i32(bin.length+1),concatBytes(new Uint8Array([0x01]),bin));
+      parts.push(new Uint8Array([0]),i32(0),new Uint8Array(0));
+      break;
+    }
+    parts.push(new Uint8Array([id]),i32(value.length),value);
+  }
   if(!seenKey)throw new Error('Cabeçalho interno KDBX sem chave de proteção.');return concatBytes(...parts);
 }
 function rewriteVariantDictRaw(bytes,replacements){
@@ -704,9 +905,86 @@ function directString(entry,key){return directChildren(entry,'String').find(s=>r
 function setStringValue(entry,key,value,protectedSet,{protect=false,removeEmpty=false}={}){let node=directString(entry,key);if(removeEmpty&&!value){if(node){for(const v of node.querySelectorAll('Value'))protectedSet.delete(v);node.remove();}return null;}if(!node){node=entry.ownerDocument.createElement('String');const k=entry.ownerDocument.createElement('Key'),v=entry.ownerDocument.createElement('Value');k.textContent=key;node.append(k,v);const auto=directChild(entry,'AutoType');if(auto)entry.insertBefore(node,auto);else entry.append(node);}let val=directChild(node,'Value');if(!val){val=entry.ownerDocument.createElement('Value');node.append(val);}val.textContent=String(value??'');if(protect)protectedSet.add(val);return node;}
 function cloneEntryForHistory(entry,protectedSet){for(const v of entry.querySelectorAll('Value'))if(protectedSet.has(v))v.setAttribute('MCProtected','1');const clone=entry.cloneNode(true);for(const v of entry.querySelectorAll('Value[MCProtected="1"]'))v.removeAttribute('MCProtected');for(const v of clone.querySelectorAll('Value[MCProtected="1"]')){v.removeAttribute('MCProtected');protectedSet.add(v);}const nested=directChild(clone,'History');nested?.remove();return clone;}
 function setTotpValue(entry,secret,protectedSet){const otpNode=directString(entry,'otp');if(otpNode){if(!secret){for(const v of otpNode.querySelectorAll('Value'))protectedSet.delete(v);otpNode.remove();return;}const old=readElementText(otpNode,':scope > Value');let next=secret;if(/^otpauth:\/\//i.test(old)){try{const u=new URL(old);u.searchParams.set('secret',secret);next=u.toString();}catch{next=secret;}}setStringValue(entry,'otp',next,protectedSet,{protect:true});return;}setStringValue(entry,'TimeOtp-Secret-Base32',secret,protectedSet,{protect:true,removeEmpty:true});if(secret){setStringValue(entry,'TimeOtp-Length','6',protectedSet);setStringValue(entry,'TimeOtp-Period','30',protectedSet);setStringValue(entry,'TimeOtp-Algorithm','HMAC-SHA-1',protectedSet);}else{for(const k of ['TimeOtp-Length','TimeOtp-Period','TimeOtp-Algorithm'])setStringValue(entry,k,'',protectedSet,{removeEmpty:true});}}
-function entryChanged(entryEl,e){const vals={};for(const s of directChildren(entryEl,'String'))vals[readElementText(s,':scope > Key')]=readElementText(s,':scope > Value');const tags=(readElementText(entryEl,':scope > Tags')||'').split(';').map(x=>x.trim()).filter(Boolean);return (vals.Title||'')!==(e.title||'')||(vals.UserName||'')!==(e.username||'')||(vals.Password||'')!==(e.password||'')||(vals.URL||'')!==(e.url||'')||(vals.Notes||'')!==(e.notes||'')||tags.join(';')!==(e.tags||[]).join(';')||totpSecretFromValues(vals)!==(e.totpSecret||'')||(String(vals['MeuCofre-Favorite']||'').toLowerCase()==='true')!==Boolean(e.favorite);}
+function fieldsSignature(list){return (list||[]).map(f=>`${f.key}\u0000${f.value}\u0000${f.protected?1:0}`).join('\u0001');}
+function attachmentsSignature(list){return (list||[]).map(a=>`${a.key}\u0000${a.ref??'new'}`).join('\u0001');}
+function entryChanged(entryEl,e){
+  const vals={};for(const s of directChildren(entryEl,'String'))vals[readElementText(s,':scope > Key')]=readElementText(s,':scope > Value');
+  const tags=(readElementText(entryEl,':scope > Tags')||'').split(';').map(x=>x.trim()).filter(Boolean);
+  const times=directChild(entryEl,'Times');
+  const oldExpiry=readEntryExpiry(times);
+  return (vals.Title||'')!==(e.title||'')||(vals.UserName||'')!==(e.username||'')||(vals.Password||'')!==(e.password||'')
+    ||(vals.URL||'')!==(e.url||'')||(vals.Notes||'')!==(e.notes||'')||tags.join(';')!==(e.tags||[]).join(';')
+    ||totpSecretFromValues(vals)!==(e.totpSecret||'')
+    ||(String(vals['MeuCofre-Favorite']||'').toLowerCase()==='true')!==Boolean(e.favorite)
+    ||fieldsSignature(readCustomFields(entryEl))!==fieldsSignature(e.fields)
+    ||attachmentsSignature(readAttachments(entryEl))!==attachmentsSignature(e.attachments)
+    ||oldExpiry.expires!==Boolean(e.expires)
+    ||(oldExpiry.expiryTime||'')!==(e.expiryTime||'');
+}
+/** Regrava os campos personalizados preservando a ordem e o flag de proteção. */
+function syncCustomFields(entryEl,fields,protectedSet){
+  const desired=new Map();
+  for(const field of (fields||[]).slice(0,MAX_CUSTOM_FIELDS)){
+    const key=String(field.key||'').trim();
+    if(!key||RESERVED_STRING_KEYS.has(key))continue;
+    desired.set(key,{value:String(field.value??''),protect:Boolean(field.protected)});
+  }
+  for(const stringEl of directChildren(entryEl,'String')){
+    const key=readElementText(stringEl,':scope > Key');
+    if(!key||RESERVED_STRING_KEYS.has(key))continue;
+    if(desired.has(key))continue;
+    for(const v of stringEl.querySelectorAll('Value'))protectedSet.delete(v);
+    stringEl.remove();
+  }
+  for(const [key,spec] of desired){
+    const node=setStringValue(entryEl,key,spec.value,protectedSet,{protect:spec.protect});
+    if(node&&!spec.protect){const v=directChild(node,'Value');if(v){protectedSet.delete(v);v.removeAttribute('Protected');}}
+  }
+}
+/**
+ * Sincroniza <Binary>. Anexos novos (`data` presente e `ref` nulo) recebem um
+ * Ref pelo callback `allocate`, que grava o conteúdo no pool do arquivo.
+ */
+function syncAttachments(entryEl,attachments,allocate){
+  const list=(attachments||[]).slice(0,MAX_ATTACHMENTS_PER_ENTRY);
+  const keep=new Set();
+  for(const item of list){
+    const key=String(item.key||'').trim();
+    if(!key)continue;
+    let ref=item.ref;
+    if(ref===null||ref===undefined){
+      if(!(item.data instanceof Uint8Array))continue;
+      ref=allocate(item.data);
+      item.ref=ref;item.size=item.data.length;item.data=null;
+    }
+    keep.add(`${key}\u0000${ref}`);
+    let node=directChildren(entryEl,'Binary').find(b=>readElementText(b,':scope > Key')===key);
+    if(!node){
+      node=entryEl.ownerDocument.createElement('Binary');
+      const k=entryEl.ownerDocument.createElement('Key'),v=entryEl.ownerDocument.createElement('Value');
+      k.textContent=key;node.append(k,v);
+      const auto=directChild(entryEl,'AutoType');
+      if(auto)entryEl.insertBefore(node,auto);else entryEl.append(node);
+    }
+    let valueEl=directChild(node,'Value');
+    if(!valueEl){valueEl=entryEl.ownerDocument.createElement('Value');node.append(valueEl);}
+    valueEl.textContent='';
+    valueEl.setAttribute('Ref',String(ref));
+  }
+  for(const node of directChildren(entryEl,'Binary')){
+    const key=readElementText(node,':scope > Key');
+    const ref=directChild(node,'Value')?.getAttribute('Ref');
+    if(!keep.has(`${key}\u0000${ref===null?'null':Number(ref)}`))node.remove();
+  }
+}
+function syncExpiry(entryEl,e,major){
+  const times=directChild(entryEl,'Times');
+  if(!times)return;
+  setDirectChildText(times,'Expires',e.expires?'True':'False');
+  if(e.expires&&e.expiryTime)setDirectChildText(times,'ExpiryTime',kdbxTimeForMajor(e.expiryTime,major));
+}
 function ensureHistory(entry){let h=directChild(entry,'History');if(!h){h=entry.ownerDocument.createElement('History');entry.append(h);}return h;}
-function createNewEntryElement(doc,e,major,protectedSet){const entry=doc.createElement('Entry'),id=randomBytes(16);e.kdbxUuidBytes=bytesToBase64(id);setDirectChildText(entry,'UUID',e.kdbxUuidBytes);setDirectChildText(entry,'IconID','0');setDirectChildText(entry,'ForegroundColor','');setDirectChildText(entry,'BackgroundColor','');setDirectChildText(entry,'OverrideURL','');setDirectChildText(entry,'Tags',(e.tags||[]).join(';'));const times=doc.createElement('Times'),now=e.createdAt||new Date().toISOString();for(const [n,v] of [['CreationTime',now],['LastModificationTime',e.updatedAt||now],['LastAccessTime',e.updatedAt||now],['ExpiryTime',e.updatedAt||now]])setDirectChildText(times,n,kdbxTimeForMajor(v,major));setDirectChildText(times,'Expires','False');setDirectChildText(times,'UsageCount','0');setDirectChildText(times,'LocationChanged',kdbxTimeForMajor(e.updatedAt||now,major));entry.append(times);setStringValue(entry,'Title',e.title,protectedSet);setStringValue(entry,'UserName',e.username,protectedSet);setStringValue(entry,'Password',e.password,protectedSet,{protect:true});setStringValue(entry,'URL',e.url,protectedSet);setStringValue(entry,'Notes',e.notes,protectedSet);if(e.totpSecret)setTotpValue(entry,e.totpSecret,protectedSet);if(e.favorite)setStringValue(entry,'MeuCofre-Favorite','True',protectedSet);const at=doc.createElement('AutoType');setDirectChildText(at,'Enabled','True');setDirectChildText(at,'DataTransferObfuscation','0');entry.append(at);wipe(id);return entry;}
+function createNewEntryElement(doc,e,major,protectedSet,allocate=null){const entry=doc.createElement('Entry'),id=randomBytes(16);e.kdbxUuidBytes=bytesToBase64(id);setDirectChildText(entry,'UUID',e.kdbxUuidBytes);setDirectChildText(entry,'IconID','0');setDirectChildText(entry,'ForegroundColor','');setDirectChildText(entry,'BackgroundColor','');setDirectChildText(entry,'OverrideURL','');setDirectChildText(entry,'Tags',(e.tags||[]).join(';'));const times=doc.createElement('Times'),now=e.createdAt||new Date().toISOString();for(const [n,v] of [['CreationTime',now],['LastModificationTime',e.updatedAt||now],['LastAccessTime',e.updatedAt||now],['ExpiryTime',e.updatedAt||now]])setDirectChildText(times,n,kdbxTimeForMajor(v,major));setDirectChildText(times,'Expires','False');setDirectChildText(times,'UsageCount','0');setDirectChildText(times,'LocationChanged',kdbxTimeForMajor(e.updatedAt||now,major));entry.append(times);setStringValue(entry,'Title',e.title,protectedSet);setStringValue(entry,'UserName',e.username,protectedSet);setStringValue(entry,'Password',e.password,protectedSet,{protect:true});setStringValue(entry,'URL',e.url,protectedSet);setStringValue(entry,'Notes',e.notes,protectedSet);if(e.totpSecret)setTotpValue(entry,e.totpSecret,protectedSet);if(e.favorite)setStringValue(entry,'MeuCofre-Favorite','True',protectedSet);syncCustomFields(entry,e.fields,protectedSet);const at=doc.createElement('AutoType');setDirectChildText(at,'Enabled','True');setDirectChildText(at,'DataTransferObfuscation','0');entry.append(at);if(allocate)syncAttachments(entry,e.attachments,allocate);syncExpiry(entry,e,major);wipe(id);return entry;}
 function addDeletedObject(doc,uuidB64,major){let deleted=doc.querySelector('KeePassFile > Root > DeletedObjects');if(!deleted){deleted=doc.createElement('DeletedObjects');doc.querySelector('KeePassFile > Root')?.append(deleted);}if(!deleted)return;const d=doc.createElement('DeletedObject');setDirectChildText(d,'UUID',uuidB64);setDirectChildText(d,'DeletionTime',kdbxTimeForMajor(new Date().toISOString(),major));deleted.append(d);}
 function createNewGroupElement(doc,g,major){
   const group=doc.createElement('Group'),uuidB64=g.kdbxUuidBytes||bytesToBase64(randomBytes(16));g.kdbxUuidBytes=uuidB64;
@@ -715,7 +993,7 @@ function createNewGroupElement(doc,g,major){
   setDirectChildText(group,'IsExpanded',g.isExpanded===false?'False':'True');setDirectChildText(group,'DefaultAutoTypeSequence',g.defaultAutoTypeSequence||'');setDirectChildText(group,'EnableAutoType',g.enableAutoType??'null');setDirectChildText(group,'EnableSearching',g.enableSearching??'null');setDirectChildText(group,'LastTopVisibleEntry',bytesToBase64(ZERO_UUID));return group;
 }
 function directDomGroups(doc){return Array.from(doc.querySelectorAll('KeePassFile > Root Group, KeePassFile > Root Group Group')).filter(g=>g.tagName==='Group');}
-function patchDocumentFromVault(doc,vault,major,protectedSet){
+function patchDocumentFromVault(doc,vault,major,protectedSet,allocate=()=>{throw new Error('Este KDBX não aceita novos anexos nesta versão.');}){
   const rootGroup=doc.querySelector('KeePassFile > Root > Group');if(!rootGroup)throw new Error('KDBX sem grupo raiz.');
   const {groups,root}=normalizeVaultGroups(vault);root.kdbxUuidBytes=readElementText(rootGroup,':scope > UUID')||root.kdbxUuidBytes;vault.rootGroupUuid=root.kdbxUuidBytes;
   const desiredGroups=new Map(groups.map(g=>[g.kdbxUuidBytes,g]));desiredGroups.set(root.kdbxUuidBytes,root);
@@ -728,32 +1006,88 @@ function patchDocumentFromVault(doc,vault,major,protectedSet){
   }
   // Remove only groups that are no longer represented by the app model. The UI only permits empty-group deletion.
   for(const [u,el] of [...domGroups]){if(el===rootGroup||desiredGroups.has(u))continue;addDeletedObject(doc,u,major);el.remove();domGroups.delete(u);}
-  const current=new Map();for(const e of vault.entries||[]){if(e.kdbxUuidBytes)current.set(e.kdbxUuidBytes,e);}
+  // Entradas sem kdbxUuidBytes são novas (criadas no Meu Cofre). Antes elas nunca
+  // entravam neste mapa e desapareciam ao salvar um KDBX importado.
+  const current=new Map(),toCreate=[];
+  for(const e of vault.entries||[]){if(e.kdbxUuidBytes)current.set(e.kdbxUuidBytes,e);else toCreate.push(e);}
   const live=Array.from(doc.querySelectorAll('Entry')).filter(e=>e.parentElement?.tagName==='Group');
-  for(const entryEl of live){const uuidB64=readElementText(entryEl,':scope > UUID');const e=current.get(uuidB64);if(!e){addDeletedObject(doc,uuidB64,major);entryEl.remove();continue;}current.delete(uuidB64);if(entryChanged(entryEl,e))ensureHistory(entryEl).append(cloneEntryForHistory(entryEl,protectedSet));setStringValue(entryEl,'Title',e.title,protectedSet);setStringValue(entryEl,'UserName',e.username,protectedSet);setStringValue(entryEl,'Password',e.password,protectedSet,{protect:true});setStringValue(entryEl,'URL',e.url,protectedSet);setStringValue(entryEl,'Notes',e.notes,protectedSet);setDirectChildText(entryEl,'Tags',(e.tags||[]).join(';'));setTotpValue(entryEl,e.totpSecret,protectedSet);setStringValue(entryEl,'MeuCofre-Favorite',e.favorite?'True':'',protectedSet,{removeEmpty:true});const times=directChild(entryEl,'Times');if(times)setDirectChildText(times,'LastModificationTime',kdbxTimeForMajor(e.updatedAt||new Date().toISOString(),major));const target=domGroups.get(e.groupUuid)||rootGroup;if(entryEl.parentElement!==target)target.append(entryEl);}
-  for(const e of current.values()){const target=domGroups.get(e.groupUuid)||rootGroup;target.append(createNewEntryElement(doc,e,major,protectedSet));}
+  for(const entryEl of live){const uuidB64=readElementText(entryEl,':scope > UUID');const e=current.get(uuidB64);if(!e){addDeletedObject(doc,uuidB64,major);entryEl.remove();continue;}current.delete(uuidB64);if(entryChanged(entryEl,e))ensureHistory(entryEl).append(cloneEntryForHistory(entryEl,protectedSet));setStringValue(entryEl,'Title',e.title,protectedSet);setStringValue(entryEl,'UserName',e.username,protectedSet);setStringValue(entryEl,'Password',e.password,protectedSet,{protect:true});setStringValue(entryEl,'URL',e.url,protectedSet);setStringValue(entryEl,'Notes',e.notes,protectedSet);setDirectChildText(entryEl,'Tags',(e.tags||[]).join(';'));setTotpValue(entryEl,e.totpSecret,protectedSet);setStringValue(entryEl,'MeuCofre-Favorite',e.favorite?'True':'',protectedSet,{removeEmpty:true});syncCustomFields(entryEl,e.fields,protectedSet);syncAttachments(entryEl,e.attachments,allocate);syncExpiry(entryEl,e,major);const times=directChild(entryEl,'Times');if(times)setDirectChildText(times,'LastModificationTime',kdbxTimeForMajor(e.updatedAt||new Date().toISOString(),major));const target=domGroups.get(e.groupUuid)||rootGroup;if(entryEl.parentElement!==target)target.append(entryEl);}
+  for(const e of [...current.values(),...toCreate]){const target=domGroups.get(e.groupUuid)||rootGroup;target.append(createNewEntryElement(doc,e,major,protectedSet,allocate));}
 }
 async function protectXmlDocument(doc,protectedSet,innerAlg,innerKey){let stream=null;if(innerAlg===0){if(protectedSet.size)throw new Error('Não é possível gravar valores protegidos sem stream interno.');}else if(innerAlg===2)stream=await innerSalsa(innerKey);else if(innerAlg===3)stream=await innerChaCha(innerKey);else throw new Error('Stream interno não suportado para gravação.');try{for(const el of Array.from(doc.querySelectorAll('Value'))){el.removeAttribute('MCProtected');if(!protectedSet.has(el))continue;const raw=utf8(el.textContent||''),enc=stream.xor(raw);el.textContent=bytesToBase64(enc);el.setAttribute('Protected','True');wipe(raw);wipe(enc);}}finally{stream?.destroy();}}
 function serializeXmlDocument(doc){let xml=new XMLSerializer().serializeToString(doc);if(!/^<\?xml/i.test(xml))xml='<?xml version="1.0" encoding="utf-8"?>'+xml;return utf8(xml);}
 
+/**
+ * Grava um KDBX 4.1 nativo. `options.kdf` aceita 'argon2id' (padrão do
+ * KeePassXC), 'argon2d' (padrão do KeePass 2.x) e 'aes'. `options.binaries`
+ * é o pool de anexos já existente, indexado por Ref.
+ */
 export async function writeKdbx(vault,components,publicMeta={},options={}){
+  const kdfChoice=KDF_CHOICES.includes(options.kdf)?options.kdf:'aes';
   const rounds=Math.max(MIN_AES_ROUNDS,Math.min(MAX_AES_ROUNDS_CREATE,Number(options.rounds||DEFAULT_AES_ROUNDS)));
-  const masterSeed=randomBytes(32),transformSeed=randomBytes(32),iv=randomBytes(16),innerKey=randomBytes(64);
-  const kdf={uuid:KDF_AES,seed:transformSeed,rounds,name:'AES-KDF'};
+  const argon2Params={...ARGON2_DEFAULTS,...(options.argon2||{})};
+  const masterSeed=randomBytes(32),kdfSalt=randomBytes(32),iv=randomBytes(16),innerKey=randomBytes(64);
+  const kdf=kdfChoice==='aes'
+    ? {uuid:KDF_AES,seed:kdfSalt,rounds,name:'AES-KDF'}
+    : {uuid:kdfChoice==='argon2id'?KDF_ARGON2ID:KDF_ARGON2D,salt:kdfSalt,iterations:argon2Params.iterations,memoryBytes:argon2Params.memoryBytes,parallelism:argon2Params.parallelism,version:argon2Params.version,secret:new Uint8Array(0),associatedData:new Uint8Array(0),name:kdfChoice==='argon2id'?'Argon2id':'Argon2d'};
+  const kdfBytes=kdfChoice==='aes'?kdfToDict(kdfSalt,rounds):argon2ToDict(kdfSalt,argon2Params,kdfChoice==='argon2id');
   const keys=await computeKeys(components,masterSeed,kdf);
+  const pool=buildBinaryPool(vault,options.binaries);
   let innerStream,xmlBytes,plaintext,encrypted,blocks;
   try{
     innerStream=await innerChaCha(innerKey);
-    const xml=buildVaultXml(vault,innerStream); xmlBytes=utf8(xml);
-    const innerHeader=concatBytes(writeInnerField(1,i32(3)),writeInnerField(2,innerKey),writeInnerField(0,new Uint8Array(0)));
+    const xml=buildVaultXml(vault,innerStream,pool.allocate); xmlBytes=utf8(xml);
+    const binaryFields=pool.list.map(data=>writeInnerField(3,concatBytes(new Uint8Array([0x01]),data)));
+    const innerHeader=concatBytes(writeInnerField(1,i32(3)),writeInnerField(2,innerKey),...binaryFields,writeInnerField(0,new Uint8Array(0)));
     plaintext=concatBytes(innerHeader,xmlBytes);
     encrypted=await aesCbcEncrypt(keys.encryptionKey,iv,plaintext);
     blocks=await hmacBlockStream(encrypted,keys.hmacBase);
-    const header=concatBytes(u32(SIG1),u32(SIG2),u32(KDBX_VERSION),writeHeaderField(2,CIPHER_AES),writeHeaderField(3,u32(0)),writeHeaderField(4,masterSeed),writeHeaderField(7,iv),writeHeaderField(11,kdfToDict(transformSeed,rounds)),writeHeaderField(12,publicMetaToDict(publicMeta)),writeHeaderField(0,new Uint8Array([13,10,13,10])));
+    const header=concatBytes(u32(SIG1),u32(SIG2),u32(KDBX_VERSION),writeHeaderField(2,CIPHER_AES),writeHeaderField(3,u32(0)),writeHeaderField(4,masterSeed),writeHeaderField(7,iv),writeHeaderField(11,kdfBytes),writeHeaderField(12,publicMetaToDict(publicMeta)),writeHeaderField(0,new Uint8Array([13,10,13,10])));
     const headerHash=await sha256(header),headerHmac=await hmacSha256(keys.headerHmacKey,header);
-    return concatBytes(header,headerHash,headerHmac,blocks);
+    return {bytes:concatBytes(header,headerHash,headerHmac,blocks),binaries:pool.map,info:{version:'4.1',cipher:'AES-256-CBC',kdf:kdf.name,rounds:kdfChoice==='aes'?rounds:null,iterations:kdfChoice==='aes'?null:argon2Params.iterations,memoryBytes:kdfChoice==='aes'?null:argon2Params.memoryBytes,parallelism:kdfChoice==='aes'?null:argon2Params.parallelism,compression:'Nenhuma'}};
   } finally {
-    innerStream?.destroy();[masterSeed,transformSeed,iv,innerKey,xmlBytes,plaintext,encrypted,blocks,keys.encryptionKey,keys.hmacBase,keys.headerHmacKey].forEach(x=>x&&wipe(x));
+    innerStream?.destroy();[masterSeed,kdfSalt,iv,innerKey,xmlBytes,plaintext,encrypted,blocks,keys.encryptionKey,keys.hmacBase,keys.headerHmacKey].forEach(x=>x&&wipe(x));
+  }
+}
+
+/**
+ * Monta o pool de binários do arquivo a partir dos anexos referenciados pelas
+ * entradas. Anexos removidos deixam de ocupar espaço e os Refs são renumerados.
+ */
+function buildBinaryPool(vault,existing){
+  const source=existing instanceof Map?existing:new Map();
+  const list=[],map=new Map();
+  const allocate=(item)=>{
+    let data=item?.data instanceof Uint8Array?item.data:null;
+    if(!data&&item?.inlineBase64){try{data=base64ToBytes(item.inlineBase64);}catch{data=null;}}
+    if(!data&&item?.ref!==null&&item?.ref!==undefined)data=source.get(Number(item.ref))||null;
+    if(!data)return null;
+    if(data.length>MAX_ATTACHMENT_BYTES)throw new Error(`O anexo “${item.key}” passa de ${Math.round(MAX_ATTACHMENT_BYTES/1048576)} MB.`);
+    const ref=list.length;
+    list.push(data);map.set(ref,data);
+    item.size=data.length;item.inlineBase64=null;item.data=null;
+    return ref;
+  };
+  return {list,map,allocate};
+}
+
+/** Bytes de um anexo, a partir do pool devolvido por `readKdbx`. */
+export function attachmentBytes(binaries,attachment){
+  if(attachment?.data instanceof Uint8Array)return attachment.data.slice();
+  if(attachment?.inlineBase64)return base64ToBytes(attachment.inlineBase64);
+  const ref=Number(attachment?.ref);
+  const found=binaries instanceof Map?binaries.get(ref):null;
+  if(!found)throw new Error('Anexo não encontrado no pool de binários deste KDBX.');
+  return found.slice();
+}
+
+function annotateAttachmentSizes(vault,binaries){
+  for(const entry of vault.entries||[]){
+    for(const item of entry.attachments||[]){
+      if(item.inlineBase64){try{const raw=base64ToBytes(item.inlineBase64);item.size=raw.length;}catch{item.size=null;}continue;}
+      const found=binaries instanceof Map?binaries.get(Number(item.ref)):null;
+      item.size=found?found.length:null;
+    }
   }
 }
 
@@ -767,8 +1101,11 @@ export async function readKdbx(bytes,components){
       try{plain=await outerDecrypt(h.cipherName,keys.encryptionKey,h.iv,encrypted);}catch(e){throw new Error(e?.message?.includes('Twofish')?e.message:'Senha/chave incorreta ou conteúdo KDBX danificado.');}
       decompressed=await maybeDecompress(plain,h.compression);
       const inner=parseInnerHeader(decompressed);if(!inner.innerKey||inner.innerAlg==null)throw new Error('Proteção interna KDBX ausente.');
-      const vault=await parseVaultXml(decompressed.slice(inner.xmlOffset),inner.innerAlg,inner.innerKey);
-      return{vault,publicMeta:h.publicMeta,info:{version:`${h.version>>>16}.${h.version&0xffff}`,cipher:h.cipherName,kdf:h.kdf.name,rounds:h.kdf.rounds||null,memoryBytes:h.kdf.memoryBytes||null,iterations:h.kdf.iterations||null,parallelism:h.kdf.parallelism||null,compression:h.compression?'GZip':'Nenhuma'}};
+      const parsed=await parseVaultXml(decompressed.slice(inner.xmlOffset),inner.innerAlg,inner.innerKey);
+      const binaries=new Map(inner.binaries.map((b,i)=>[i,b.data]));
+      for(const [ref,data] of parsed.legacyBinaries)if(!binaries.has(ref))binaries.set(ref,data);
+      annotateAttachmentSizes(parsed.vault,binaries);
+      return{vault:parsed.vault,binaries,publicMeta:h.publicMeta,info:{version:`${h.version>>>16}.${h.version&0xffff}`,cipher:h.cipherName,kdf:h.kdf.name,rounds:h.kdf.rounds||null,memoryBytes:h.kdf.memoryBytes||null,iterations:h.kdf.iterations||null,parallelism:h.kdf.parallelism||null,compression:h.compression?'GZip':'Nenhuma'}};
     }
     // KDBX 3.1: decrypt first, verify StreamStartBytes, then SHA-256 block stream.
     const cipherText=bytes.slice(h.bodyOffset);
@@ -777,8 +1114,9 @@ export async function readKdbx(bytes,components){
     const blockData=await verifyHashedBlockStreamV3(plain,h.streamStartBytes.length);
     decompressed=await maybeDecompress(blockData,h.compression);wipe(blockData);
     headerHash=await sha256(h.headerBytes);
-    const vault=await parseVaultXml(decompressed,h.innerAlg,h.protectedStreamKey,headerHash);
-    return{vault,publicMeta:h.publicMeta,info:{version:`${h.version>>>16}.${h.version&0xffff}`,cipher:h.cipherName,kdf:'AES-KDF',rounds:h.kdf.rounds,compression:h.compression?'GZip':'Nenhuma'}};
+    const parsed=await parseVaultXml(decompressed,h.innerAlg,h.protectedStreamKey,headerHash);
+    annotateAttachmentSizes(parsed.vault,parsed.legacyBinaries);
+    return{vault:parsed.vault,binaries:parsed.legacyBinaries,publicMeta:h.publicMeta,info:{version:`${h.version>>>16}.${h.version&0xffff}`,cipher:h.cipherName,kdf:'AES-KDF',rounds:h.kdf.rounds,compression:h.compression?'GZip':'Nenhuma'}};
   } finally {[keys.encryptionKey,keys.hmacBase,keys.headerHmacKey,encrypted,plain,decompressed,headerHash].forEach(x=>x&&wipe(x));}
 }
 
@@ -817,14 +1155,18 @@ function externalMetaAfterUnlock(record,passwordUsed,keyUsed){const m=sanitizeSi
 
 export function newPublicMeta(mode,webauthnUserId=null){return{schema:PUBLIC_SCHEMA,appVersion:APP_VERSION,mode,webauthnUserId:webauthnUserId||bytesToBase64(randomBytes(32)),slots:[],recoveryKeyRequired:mode!==PROTECTION_MODES.PASSWORD};}
 
-export async function createKdbxRecord({vault,mode,password=null,registration=null,prfSecret=null,rounds=null,webauthnUserId=null}){
+export async function createKdbxRecord({vault,mode,password=null,registration=null,prfSecret=null,rounds=null,webauthnUserId=null,kdf='argon2id'}){
   if(!Object.values(PROTECTION_MODES).includes(mode))throw new Error('Modo de proteção KDBX inválido.');
   const meta=newPublicMeta(mode,webauthnUserId);const components=[];let keyFileComponent=null,passwordHash=null;
   try{
     if(mode===PROTECTION_MODES.PASSWORD||mode===PROTECTION_MODES.PASSWORD_YUBIKEY){if(!password)throw new Error('Senha mestra obrigatória.');passwordHash=await passwordComponent(password);components.push(passwordHash);}
     if(mode===PROTECTION_MODES.YUBIKEY||mode===PROTECTION_MODES.PASSWORD_YUBIKEY){if(!registration||!prfSecret)throw new Error('YubiKey PRF obrigatória para este modo.');keyFileComponent=randomKeyFileComponent();components.push(keyFileComponent);meta.slots.push(await createPrfComponentSlot(keyFileComponent,registration,prfSecret,'keyfile'));}
-    const actualRounds=rounds||await calibrateAesKdf(1000);const bytes=await writeKdbx(vault,components,meta,{rounds:actualRounds});
-    return{record:makeStoredRecord(bytes),vault,components:components.map(c=>c.slice()),publicMeta:meta,kdbxInfo:{version:'4.1',cipher:'AES-256-CBC',kdf:'AES-KDF',rounds:actualRounds,compression:'Nenhuma'},recoveryKey:keyFileComponent?.slice()||null};
+    const useAes=kdf==='aes';
+    const actualRounds=useAes?(rounds||await calibrateAesKdf(1000)):null;
+    const written=await writeKdbx(vault,components,meta,{kdf,rounds:actualRounds||DEFAULT_AES_ROUNDS});
+    try{
+      return{record:makeStoredRecord(written.bytes),vault,components:components.map(c=>c.slice()),publicMeta:meta,binaries:written.binaries,kdbxInfo:written.info,recoveryKey:keyFileComponent?.slice()||null};
+    } finally { wipe(written.bytes); }
   }finally{passwordHash&&wipe(passwordHash);keyFileComponent&&wipe(keyFileComponent);}
 }
 
@@ -846,36 +1188,67 @@ export async function openStoredKdbxWithRecoveryKey(record,keyBytes,password=nul
   ensureBytes(keyBytes,32,'Chave de recuperação');if(record.external)return openStoredKdbxGeneric(record,password,keyBytes);const bytes=storedRecordBytes(record),h=parseHeader(bytes),mode=h.publicMeta.mode;let pc=null;try{const components=[];if(mode===PROTECTION_MODES.PASSWORD_YUBIKEY){if(!password)throw new Error('Este cofre exige a senha mestra junto com a chave de recuperação.');pc=await passwordComponent(password);components.push(pc);}else if(mode===PROTECTION_MODES.PASSWORD)throw new Error('Este cofre usa senha mestra, não chave de recuperação.');components.push(keyBytes);const opened=await readKdbx(bytes,components);return{...opened,components:components.map(c=>c.slice()),external:false};}finally{pc&&wipe(pc);wipe(bytes);}
 }
 
-async function rewriteExternalKdbx(record,vault,components){
+async function rewriteExternalKdbx(record,vault,components,binaries=null){
   const bytes=storedRecordBytes(record),h=parseHeader(bytes);let oldKeys=null,newKeys=null,encrypted=null,plain=null,decompressed=null,xmlBytes=null,payload=null,compressed=null,newEncrypted=null,blocks=null,newHeader=null,newKdfBytes=null,newMasterSeed=null,newIv=null,newInnerKey=null,newStreamKey=null,newStreamStart=null,newTransformSeed=null;
   try{
     oldKeys=await computeKeys(components,h.masterSeed,h.kdf);
     if(h.major===4){
       const actualHash=await sha256(h.headerBytes);if(!sameBytes(actualHash,h.storedHash)){wipe(actualHash);throw new Error('Hash do cabeçalho KDBX inválido.');}wipe(actualHash);const actualHmac=await hmacSha256(oldKeys.headerHmacKey,h.headerBytes);if(!sameBytes(actualHmac,h.storedHmac)){wipe(actualHmac);throw new Error('Credenciais KDBX não conferem para gravação.');}wipe(actualHmac);
-      encrypted=await verifyBlockStream(bytes,h.bodyOffset,oldKeys.hmacBase);plain=await outerDecrypt(h.cipherName,oldKeys.encryptionKey,h.iv,encrypted);decompressed=await maybeDecompress(plain,h.compression);const inner=parseInnerHeader(decompressed);const opened=await editableXmlDocument(decompressed.slice(inner.xmlOffset),inner.innerAlg,inner.innerKey);patchDocumentFromVault(opened.doc,vault,4,opened.protectedSet);
-      newInnerKey=randomBytes(inner.innerKey.length);await protectXmlDocument(opened.doc,opened.protectedSet,inner.innerAlg,newInnerKey);xmlBytes=serializeXmlDocument(opened.doc);const newInnerHeader=rewriteInnerHeader(inner.headerBytes,newInnerKey);payload=concatBytes(newInnerHeader,xmlBytes);compressed=await maybeCompress(payload,h.compression);
-      const oldSalt=h.kdf.name==='AES-KDF'?h.kdf.seed:h.kdf.salt,newSalt=randomBytes(oldSalt.length);newKdfBytes=rewriteVariantDictRaw(h.kdfBytes,new Map([['S',newSalt]]));wipe(newSalt);const newKdf=parseKdf(newKdfBytes);newMasterSeed=randomBytes(32);newIv=randomBytes(h.iv.length);newHeader=rewriteHeaderV4(h.headerBytes,new Map([[4,newMasterSeed],[7,newIv],[11,newKdfBytes]]));newKeys=await computeKeys(components,newMasterSeed,newKdf);newEncrypted=await outerEncrypt(h.cipherName,newKeys.encryptionKey,newIv,compressed);blocks=await hmacBlockStream(newEncrypted,newKeys.hmacBase);const hh=await sha256(newHeader),hm=await hmacSha256(newKeys.headerHmacKey,newHeader);const out=concatBytes(newHeader,hh,hm,blocks);wipe(hh);wipe(hm);return out;
+      encrypted=await verifyBlockStream(bytes,h.bodyOffset,oldKeys.hmacBase);plain=await outerDecrypt(h.cipherName,oldKeys.encryptionKey,h.iv,encrypted);decompressed=await maybeDecompress(plain,h.compression);const inner=parseInnerHeader(decompressed);const opened=await editableXmlDocument(decompressed.slice(inner.xmlOffset),inner.innerAlg,inner.innerKey);
+      // Anexos novos são acrescentados ao pool do cabeçalho interno; o Ref é a posição.
+      const addedBinaries=[];const nextPool=new Map(inner.binaries.map((b,i)=>[i,b.data]));
+      const allocate=(data)=>{if(!(data instanceof Uint8Array))throw new Error('Anexo inválido.');if(data.length>MAX_ATTACHMENT_BYTES)throw new Error(`Anexo acima de ${Math.round(MAX_ATTACHMENT_BYTES/1048576)} MB.`);const ref=inner.binaries.length+addedBinaries.length;addedBinaries.push(data.slice());nextPool.set(ref,data.slice());return ref;};
+      patchDocumentFromVault(opened.doc,vault,4,opened.protectedSet,allocate);
+      newInnerKey=randomBytes(inner.innerKey.length);await protectXmlDocument(opened.doc,opened.protectedSet,inner.innerAlg,newInnerKey);xmlBytes=serializeXmlDocument(opened.doc);const newInnerHeader=rewriteInnerHeader(inner.headerBytes,newInnerKey,addedBinaries);payload=concatBytes(newInnerHeader,xmlBytes);compressed=await maybeCompress(payload,h.compression);
+      const oldSalt=h.kdf.name==='AES-KDF'?h.kdf.seed:h.kdf.salt,newSalt=randomBytes(oldSalt.length);newKdfBytes=rewriteVariantDictRaw(h.kdfBytes,new Map([['S',newSalt]]));wipe(newSalt);const newKdf=parseKdf(newKdfBytes);newMasterSeed=randomBytes(32);newIv=randomBytes(h.iv.length);newHeader=rewriteHeaderV4(h.headerBytes,new Map([[4,newMasterSeed],[7,newIv],[11,newKdfBytes]]));newKeys=await computeKeys(components,newMasterSeed,newKdf);newEncrypted=await outerEncrypt(h.cipherName,newKeys.encryptionKey,newIv,compressed);blocks=await hmacBlockStream(newEncrypted,newKeys.hmacBase);const hh=await sha256(newHeader),hm=await hmacSha256(newKeys.headerHmacKey,newHeader);const out=concatBytes(newHeader,hh,hm,blocks);wipe(hh);wipe(hm);return{bytes:out,binaries:nextPool};
     }
-    const cipherText=bytes.slice(h.bodyOffset);plain=await outerDecrypt(h.cipherName,oldKeys.encryptionKey,h.iv,cipherText);if(plain.length<h.streamStartBytes.length||!sameBytes(plain.slice(0,h.streamStartBytes.length),h.streamStartBytes))throw new Error('Credenciais KDBX 3.1 não conferem para gravação.');const blockData=await verifyHashedBlockStreamV3(plain,h.streamStartBytes.length);decompressed=await maybeDecompress(blockData,h.compression);wipe(blockData);const oldHeaderHash=await sha256(h.headerBytes);const opened=await editableXmlDocument(decompressed,h.innerAlg,h.protectedStreamKey,oldHeaderHash);wipe(oldHeaderHash);patchDocumentFromVault(opened.doc,vault,3,opened.protectedSet);
-    newMasterSeed=randomBytes(32);newTransformSeed=randomBytes(32);newIv=randomBytes(h.iv.length);newStreamKey=randomBytes(h.protectedStreamKey.length);newStreamStart=randomBytes(h.streamStartBytes.length);newHeader=rewriteHeaderV3(h.headerBytes,new Map([[4,newMasterSeed],[5,newTransformSeed],[7,newIv],[8,newStreamKey],[9,newStreamStart]]));const meta=opened.doc.querySelector('KeePassFile > Meta');if(meta){const hh=await sha256(newHeader);setDirectChildText(meta,'HeaderHash',bytesToBase64(hh));wipe(hh);}await protectXmlDocument(opened.doc,opened.protectedSet,h.innerAlg,newStreamKey);xmlBytes=serializeXmlDocument(opened.doc);compressed=await maybeCompress(xmlBytes,h.compression);blocks=await hashedBlockStreamV3(compressed);payload=concatBytes(newStreamStart,blocks);const newKdf={...h.kdf,seed:newTransformSeed};newKeys=await computeKeys(components,newMasterSeed,newKdf);newEncrypted=await outerEncrypt(h.cipherName,newKeys.encryptionKey,newIv,payload);return concatBytes(newHeader,newEncrypted);
+    const cipherText=bytes.slice(h.bodyOffset);plain=await outerDecrypt(h.cipherName,oldKeys.encryptionKey,h.iv,cipherText);if(plain.length<h.streamStartBytes.length||!sameBytes(plain.slice(0,h.streamStartBytes.length),h.streamStartBytes))throw new Error('Credenciais KDBX 3.1 não conferem para gravação.');const blockData=await verifyHashedBlockStreamV3(plain,h.streamStartBytes.length);decompressed=await maybeDecompress(blockData,h.compression);wipe(blockData);const oldHeaderHash=await sha256(h.headerBytes);const opened=await editableXmlDocument(decompressed,h.innerAlg,h.protectedStreamKey,oldHeaderHash);wipe(oldHeaderHash);
+    const legacyPool=await collectLegacyBinaries(opened.doc);
+    const allocate3=(data)=>{
+      if(!(data instanceof Uint8Array))throw new Error('Anexo inválido.');
+      if(data.length>MAX_ATTACHMENT_BYTES)throw new Error(`Anexo acima de ${Math.round(MAX_ATTACHMENT_BYTES/1048576)} MB.`);
+      const meta3=opened.doc.querySelector('KeePassFile > Meta');
+      if(!meta3)throw new Error('KDBX 3.1 sem <Meta> para gravar o anexo.');
+      let container=meta3.querySelector(':scope > Binaries');
+      if(!container){container=opened.doc.createElement('Binaries');meta3.append(container);}
+      let ref=0;for(const k of legacyPool.keys())ref=Math.max(ref,k+1);
+      const node=opened.doc.createElement('Binary');
+      node.setAttribute('ID',String(ref));node.setAttribute('Compressed','False');
+      node.textContent=bytesToBase64(data);container.append(node);
+      legacyPool.set(ref,data.slice());
+      return ref;
+    };
+    patchDocumentFromVault(opened.doc,vault,3,opened.protectedSet,allocate3);
+    newMasterSeed=randomBytes(32);newTransformSeed=randomBytes(32);newIv=randomBytes(h.iv.length);newStreamKey=randomBytes(h.protectedStreamKey.length);newStreamStart=randomBytes(h.streamStartBytes.length);newHeader=rewriteHeaderV3(h.headerBytes,new Map([[4,newMasterSeed],[5,newTransformSeed],[7,newIv],[8,newStreamKey],[9,newStreamStart]]));const meta=opened.doc.querySelector('KeePassFile > Meta');if(meta){const hh=await sha256(newHeader);setDirectChildText(meta,'HeaderHash',bytesToBase64(hh));wipe(hh);}await protectXmlDocument(opened.doc,opened.protectedSet,h.innerAlg,newStreamKey);xmlBytes=serializeXmlDocument(opened.doc);compressed=await maybeCompress(xmlBytes,h.compression);blocks=await hashedBlockStreamV3(compressed);payload=concatBytes(newStreamStart,blocks);const newKdf={...h.kdf,seed:newTransformSeed};newKeys=await computeKeys(components,newMasterSeed,newKdf);newEncrypted=await outerEncrypt(h.cipherName,newKeys.encryptionKey,newIv,payload);return{bytes:concatBytes(newHeader,newEncrypted),binaries:legacyPool};
   }finally{
     [bytes,encrypted,plain,decompressed,xmlBytes,payload,compressed,newEncrypted,blocks,newHeader,newKdfBytes,newMasterSeed,newIv,newInnerKey,newStreamKey,newStreamStart,newTransformSeed,oldKeys?.encryptionKey,oldKeys?.hmacBase,oldKeys?.headerHmacKey,newKeys?.encryptionKey,newKeys?.hmacBase,newKeys?.headerHmacKey].forEach(x=>x&&wipe(x));
   }
 }
 
-export async function saveStoredKdbx(record,vault,components,publicMeta,rounds=null){
-  if(record?.external){const bytes=await rewriteExternalKdbx(record,vault,components);try{return makeStoredRecord(bytes,{external:true,fileName:record.fileName,sidecarMeta:record.sidecarMeta,sidecarPrefs:record.sidecarPrefs});}finally{wipe(bytes);}}
-  const current=inspectKdbx(storedRecordBytes(record));const bytes=await writeKdbx(vault,components,publicMeta,{rounds:rounds||current.rounds||DEFAULT_AES_ROUNDS});try{return makeStoredRecord(bytes);}finally{wipe(bytes);}
+export async function saveStoredKdbx(record,vault,components,publicMeta,rounds=null,binaries=null){
+  if(record?.external){
+    const out=await rewriteExternalKdbx(record,vault,components,binaries);
+    try{return{record:makeStoredRecord(out.bytes,{external:true,fileName:record.fileName,sidecarMeta:record.sidecarMeta,sidecarPrefs:record.sidecarPrefs}),binaries:out.binaries};}finally{wipe(out.bytes);}
+  }
+  const current=inspectKdbx(storedRecordBytes(record));
+  const kdf=current.kdf==='Argon2id'?'argon2id':current.kdf==='Argon2d'?'argon2d':'aes';
+  const written=await writeKdbx(vault,components,publicMeta,{
+    kdf,
+    rounds:rounds||current.rounds||DEFAULT_AES_ROUNDS,
+    argon2:kdf==='aes'?undefined:{iterations:current.iterations||ARGON2_DEFAULTS.iterations,memoryBytes:current.memoryBytes||ARGON2_DEFAULTS.memoryBytes,parallelism:current.parallelism||ARGON2_DEFAULTS.parallelism,version:0x13},
+    binaries
+  });
+  try{return{record:makeStoredRecord(written.bytes),binaries:written.binaries};}finally{wipe(written.bytes);}
 }
 
 export async function addPrfSlotToKdbx(record,session,registration,prfSecret){
   if(record?.external){const bundle=concatBytes(...session.components);try{const slot=await createPrfComponentSlot(bundle,registration,prfSecret,'component-bundle');const meta=sanitizeSidecarMeta(session.publicMeta||record.sidecarMeta);meta.slots.push(slot);const next={...record,sidecarMeta:meta,updatedAt:new Date().toISOString()};return{record:next,publicMeta:meta,slot};}finally{wipe(bundle);}}
   const mode=session.publicMeta.mode;let component;if(mode===PROTECTION_MODES.PASSWORD){component=session.components[0];}else component=session.components[session.components.length-1];
   const slot=await createPrfComponentSlot(component,registration,prfSecret,mode===PROTECTION_MODES.PASSWORD?'password-component':'keyfile');
-  const meta=structuredClone(session.publicMeta);meta.slots.push(slot);const next=await saveStoredKdbx(record,session.vault,session.components,meta,session.kdbxInfo?.rounds);return{record:next,publicMeta:meta,slot};
+  const meta=structuredClone(session.publicMeta);meta.slots.push(slot);const saved=await saveStoredKdbx(record,session.vault,session.components,meta,session.kdbxInfo?.rounds,session.binaries);return{record:saved.record,publicMeta:meta,slot,binaries:saved.binaries};
 }
 
-export async function removePrfSlotFromKdbx(record,session,slotId){const meta=record?.external?sanitizeSidecarMeta(session.publicMeta||record.sidecarMeta):structuredClone(session.publicMeta);const slot=meta.slots.find(s=>s.id===slotId);if(!slot)return{record,publicMeta:meta};if(!record.external&&meta.mode!==PROTECTION_MODES.PASSWORD&&meta.slots.filter(s=>s.type==='webauthn-prf'&&s.id!==slotId).length===0)throw new Error('Não remova a última YubiKey antes de exportar/confirmar a chave de recuperação ou cadastrar outra chave.');meta.slots=meta.slots.filter(s=>s.id!==slotId);if(record.external)return{record:{...record,sidecarMeta:meta,updatedAt:new Date().toISOString()},publicMeta:meta};const next=await saveStoredKdbx(record,session.vault,session.components,meta,session.kdbxInfo?.rounds);return{record:next,publicMeta:meta};}
+export async function removePrfSlotFromKdbx(record,session,slotId){const meta=record?.external?sanitizeSidecarMeta(session.publicMeta||record.sidecarMeta):structuredClone(session.publicMeta);const slot=meta.slots.find(s=>s.id===slotId);if(!slot)return{record,publicMeta:meta};if(!record.external&&meta.mode!==PROTECTION_MODES.PASSWORD&&meta.slots.filter(s=>s.type==='webauthn-prf'&&s.id!==slotId).length===0)throw new Error('Não remova a última YubiKey antes de exportar/confirmar a chave de recuperação ou cadastrar outra chave.');meta.slots=meta.slots.filter(s=>s.id!==slotId);if(record.external)return{record:{...record,sidecarMeta:meta,updatedAt:new Date().toISOString()},publicMeta:meta};const saved=await saveStoredKdbx(record,session.vault,session.components,meta,session.kdbxInfo?.rounds,session.binaries);return{record:saved.record,publicMeta:meta,binaries:saved.binaries};}
 
 export function exportRecoveryKeyBytes(session){if(session?.external)throw new Error('O key file original de um KDBX externo não é armazenado pelo Meu Cofre. Use o backup original do KeePassXC.');if(session?.publicMeta?.mode===PROTECTION_MODES.PASSWORD)throw new Error('Este cofre não usa chave de recuperação separada.');const key=session?.components?.[session.components.length-1];ensureBytes(key,32,'Chave de recuperação');return key.slice();}
 
@@ -898,7 +1271,7 @@ export async function changeKdbxMasterPassword(record,session,newPassword){
   if(mode===PROTECTION_MODES.PASSWORD && (session.publicMeta.slots||[]).length) throw new Error('Remova temporariamente as YubiKeys/chaves de acesso antes de trocar a senha neste modo e cadastre-as novamente depois.');
   const pc=await passwordComponent(newPassword);
   const components=mode===PROTECTION_MODES.PASSWORD ? [pc] : [pc,session.components[session.components.length-1]];
-  try{const next=await saveStoredKdbx(record,session.vault,components,session.publicMeta,session.kdbxInfo?.rounds);return {record:next,components:components.map(c=>c.slice())};} finally { wipe(pc); }
+  try{const saved=await saveStoredKdbx(record,session.vault,components,session.publicMeta,session.kdbxInfo?.rounds,session.binaries);return {record:saved.record,components:components.map(c=>c.slice()),binaries:saved.binaries};} finally { wipe(pc); }
 }
 
 export function migrateLegacyVaultData(legacyVault){const now=new Date().toISOString(),rootGroupUuid=bytesToBase64(randomBytes(16));return{schema:3,id:legacyVault.id||uuid(),name:legacyVault.name||'Meu Cofre',createdAt:legacyVault.createdAt||now,updatedAt:now,rootGroupUuid,groups:[{id:uuid(),kdbxUuidBytes:rootGroupUuid,parentUuid:null,name:legacyVault.name||'Meu Cofre',notes:'',iconId:'48',isExpanded:true,enableAutoType:'null',enableSearching:'null',defaultAutoTypeSequence:'',createdAt:legacyVault.createdAt||now,updatedAt:now,isRoot:true}],entries:(legacyVault.entries||[]).map(e=>({...e,id:e.id||uuid(),kdbxUuidBytes:bytesToBase64(randomBytes(16)),groupUuid:rootGroupUuid})),settings:{idleLockMinutes:legacyVault.settings?.idleLockMinutes??5,backgroundLockSeconds:legacyVault.settings?.backgroundLockSeconds??0,clipboardClearSeconds:legacyVault.settings?.clipboardClearSeconds??20}};}

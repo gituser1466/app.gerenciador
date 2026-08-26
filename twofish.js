@@ -177,3 +177,11 @@ export function twofishCbcDecrypt(key,iv,ciphertext){
 export function twofishEncryptBlockForTest(key,block){const s=makeSession(key),out=new Uint8Array(16);encryptBlock(block,0,out,0,s);for(const a of s.s)a.fill(0);s.k.fill(0);return out;}
 
 export function twofishDecryptBlockForTest(key,block){const s=makeSession(key),out=new Uint8Array(16);decryptBlock(block,0,out,0,s);for(const a of s.s)a.fill(0);s.k.fill(0);return out;}
+
+// Acesso em nível de bloco, usado pelo modo XTS do VeraCrypt (vc-ciphers.js).
+// `encryptBlock`/`decryptBlock` leem todo o bloco antes de escrever, então
+// src === out no mesmo offset é seguro.
+export function twofishBlockContext(key){ return makeSession(key); }
+export function twofishEncryptBlockInto(ctx,input,inOff,output,outOff){ encryptBlock(input,inOff,output,outOff,ctx); }
+export function twofishDecryptBlockInto(ctx,input,inOff,output,outOff){ decryptBlock(input,inOff,output,outOff,ctx); }
+export function twofishFreeContext(ctx){ if(!ctx)return; for(const a of ctx.s)a.fill(0); ctx.k.fill(0); }

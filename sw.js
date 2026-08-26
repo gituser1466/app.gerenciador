@@ -1,35 +1,39 @@
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.9.1';
 const CACHE = `meucofre-shell-v${APP_VERSION}`;
 
 // Hashes gerados no fechamento da release. O Service Worker recusa uma instalação
 // parcial/corrompida. Isso protege contra erro de upload/cache; não substitui a
 // segurança da conta/origem de hospedagem, pois quem controla a origem controla o SW.
 const ASSET_HASHES = Object.freeze({
-  './index.html': 'd961784502621e9ce3930c08c8f0f0e3afcb46cd626955d3b898db2ac8061013',
-  './styles.css': '745680f34a8aaba776c8f0c4b3adccbb01f412b46ce8640abfdc416eadd34eac',
-  './manifest.webmanifest': '24ebb1533f669737bf9d5cd1c76c415b954ee21d23acb57a6e8d4c024de22d12',
+  './index.html': 'a3a68b7c2b8058bbb83bb7f69563d5ddd0a2270b29937769e3ea868bbf2382fb',
+  './styles.css': '7a9f09146fd493350efed1ebcf09bcab0c1c79581d61142f082e4b6b049c01aa',
+  './manifest.webmanifest': '3ab272c413a7841587d97fbda04a25efa94ca525b499fcea55d2174373145062',
   './icon-192.png': '8dd0fc36a67b996a4586d795b92510d2f7e22a22d9ba8a4bb0b569653a7c2ad0',
   './icon-512.png': '0c81756a3fed05816ba2c236e75092ccbce3a3c08e3edea9c3253b5abeb7e51e',
   './apple-touch-icon.png': '5e0434ff5e6d4b54a376bb72ee9dfca9eb7cf04d152f6fb275bbb7c558e65e6e',
-  './app.js': 'f3c69034a73476c8a537572c8dd1cdaea7d6041fb62f300f2404961ef14ac215',
-  './utils.js': 'fb5a397fda790ba7f596b6eb2ca1e8a72bb67578eaa0c406f466205cafa8a70b',
+  './appearance.js': 'cc19fec1b5fb556d693d306a4dd18f00c5b00af74ac419fd7cf25bd1a8df0251',
+  './app.js': '99d15f8712340dd0e587397b4308c19c5a619df2abf70b29c2ca06884e7976ba',
+  './utils.js': 'cd5f41a39ceb207b69bf15d9d1b863e990c39da935bc2d89e0a54bed99e7420c',
   './storage.js': 'c37814b23abd14e0ac49f56837ec9decbcd74a3657ec30c130a763e1b902da21',
   './legacy-vault.js': 'd663a38de94a994c4ba1a713a6934556327b192464fb9867bff145b0826481f3',
-  './kdbx.js': '887d7397cbb011b16c88e74bda0f85035e377444a92e40a17ec72fd2fe9f3416',
+  './kdbx.js': '64d8500efd96ce97def690b5cd1d1528ef509b3344113d43c5bcc6eb5bdba9c0',
   './webauthn.js': 'a4e9bb9fbea5780f341e034dc64737b6838755a00482c92f0614c59345a59f36',
   './totp.js': '137058587a6d0db77a751f7731b8795baf0cfff3ebb70e550dc6a36144a80679',
   './generator.js': '81197ae74f52857dbcaa61581b462a7a442c4c909d045d9b2708490610582085',
-  './veracrypt.js': 'b04ba30f77e909dbe033e82b420318f41c58ebbf1db7bb3537553ce887a69acb',
+  './veracrypt.js': 'b9b10842f3c1707bd048bf1aee2d0b57d03903f1e306ac59d3a782787fb269aa',
   './veracrypt-advanced.js': 'b99ef9e85d285f24731942da1a7468d6e0c7fc0d7f212566838c263dfca6576a',
   './veracrypt-fido.js': 'c689ab02da5beaa1e366d80d87f3bbda1e92ef88ae739ad1ea0e4ebf2d6f960b',
   './veracrypt-linked.js': '1fa6747210ee8fa6f37c22653026842d5a2d4f2dad3ebbb3fe6073699f36ae7f',
   './veracrypt-macos-bridge.js': '8274c01bebc7365a339190877fcc7c62774cf4231a82e58c5101ead51d5acdfa',
-  './filesystem.js': '4bb193f2ad835914a0306eea120821106765d1f0f223f3a8baf874afdde20755',
-  './fat.js': '82ea09aacd1360efb5fa6a1ecba33d7ef36e892239c9a517d2fddc5dc870b5b9',
+  './vc-ciphers.js': '90671d2d61053c64f673315a9ba6646dd9a72ccf0dcb5bb3d0d7517ef76a643e',
+  './vc-hash.js': '16990bc1c956fd62b6b570061dee91c99ae88c83cbd36e98133c1d12ff15d2c4',
+  './filesystem.js': 'fb59009fcb572ab6e228d086bd86ebeb7e9a9c26039fc164d7e08aeb6d7b33e9',
+  './fat.js': '860fa2cbcdde3c35d9865576a22b6406ccb35e10e680a21927bd62551cbcd4f7',
   './exfat.js': '443184ffcc20b2a9f9ff050d5beb6f1cef8fb3435e05c1c18de75d21c6fcdc05',
-  './argon2-kdf.js': '7a496b993062f6b636b41d5fa76a850716d83e10ac9c14bda71977d339d542a5',
+  './hfsplus.js': '8b1d4871ad0ee8775efd1a5c6d2fbb7f334fc52b1131bc655d67b45fa4f5ebaf',
+  './argon2-kdf.js': '15b67b65be454f6fe22fd19eae18e47686e3a496440f721bfbdd74ac8a49ecef',
   './argon2-kdf.wasm': '9720380a7e99573f7d3df22e884f8dc128200519c6e91ad5886fa5414935a6bf',
-  './twofish.js': 'f09082a748e2b6b4b8185325898cd91054431b41196984d380132d284dad0841',
+  './twofish.js': '1d8d4e49db11fa149d5df9ec3d73f72b8f9792e4985ba441aba8ce4c7004f8ec',
   './MeuCofre-VeraCrypt-macOS.command': 'b5eae1601b027449342dd0a65ddfbced721b5a0f0aceddacf1209e5ff058eeab'
 });
 

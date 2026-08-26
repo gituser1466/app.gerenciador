@@ -11,6 +11,7 @@ import {
 } from './legacy-vault.js';
 import {
   addPrfSlotToKdbx,
+  attachmentBytes,
   changeKdbxMasterPassword,
   createKdbxRecord,
   defaultKdbxVault,
@@ -32,15 +33,15 @@ import {
 import { evaluatePrf, platformAuthenticatorAvailable, registerPrfCredential } from './webauthn.js';
 import { generatePassword } from './generator.js';
 import { totp } from './totp.js';
-import { openVeraCryptFile, reencryptVeraCryptHeaders, repairVeraCryptPrimaryHeader } from './veracrypt.js';
+import { ENCRYPTION_ALGORITHM_NAMES, openVeraCryptFile, reencryptVeraCryptHeaders, repairVeraCryptPrimaryHeader, UNSUPPORTED_ENCRYPTION_ALGORITHMS, VERACRYPT_HASHES } from './veracrypt.js';
 import { createVeraCryptHeaderBackup, generateVeraCryptKeyfile, keyfileSha256, restoreVeraCryptHeaderBackup } from './veracrypt-advanced.js';
-import { openSupportedFileSystem } from './filesystem.js';
+import { openSupportedFileSystem, SUPPORTED_FILE_SYSTEMS } from './filesystem.js';
 import { addSlot as addVeraCryptFidoSlot, createProfile as createVeraCryptFidoProfile, openRecoveryVault as openVeraCryptRecoveryVault, rawKeyfileBlob, recoveryFromFile, recoveryToBlob, unwrapSecretFromSlot, validateProfile as validateVeraCryptFidoProfile, wrapSecretForRegistration } from './veracrypt-fido.js';
 import { addLinkedProfileSlot, buildCredentialBundle, changeRecoveryPassword as changeLinkedRecoveryPassword, createLinkedProfile, decryptBundle as decryptLinkedBundle, materializeBundleCredentials, profileFromFile as linkedProfileFromFile, profileToBlob as linkedProfileToBlob, removeLinkedProfileSlot, unwrapDekFromRecovery as unwrapLinkedDekFromRecovery, unwrapDekFromSlot as unwrapLinkedDekFromSlot, validateLinkedProfile, verifyContainerAgainstProfile, wipeMaterializedCredentials } from './veracrypt-linked.js';
-import { base64ToBytes, bytesToBase64, clampInt, downloadBlob, formatDateTime, safeHttpUrl, uuid, wipe } from './utils.js';
+import { base64ToBytes, bytesToBase64, clampInt, downloadBlob, formatBytes, formatDateTime, safeHttpUrl, saveBlob, uuid, wipe } from './utils.js';
 import { createMacMountPackage, macMountFilename, macMountPackageBlob, parseMacPairingFile, validateMacPairing } from './veracrypt-macos-bridge.js';
 
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.9.1';
 const $ = (id) => document.getElementById(id);
 let record = null;
 let session = null;
@@ -67,12 +68,25 @@ let vcLinkSelectedFile = null;
 let vcLinkKeyfiles = [];
 let vcLinkedPendingOpen = null;
 let vcMacPairing = null;
+let entryFields = [];
+let entryAttachments = [];
+
+const APPEARANCE_KEY = 'meucofre.appearance';
+function currentAppearance() {
+  try { const v = localStorage.getItem(APPEARANCE_KEY); return v === 'light' || v === 'dark' ? v : 'system'; } catch { return 'system'; }
+}
+function applyAppearance(value) {
+  const next = value === 'light' || value === 'dark' ? value : 'system';
+  if (next === 'system') document.documentElement.removeAttribute('data-appearance');
+  else document.documentElement.setAttribute('data-appearance', next);
+  try { if (next === 'system') localStorage.removeItem(APPEARANCE_KEY); else localStorage.setItem(APPEARANCE_KEY, next); } catch { /* Safari privado */ }
+}
 
 function isLegacyRecord(value) { return value?.format === LEGACY_FORMAT; }
 function isLegacySession() { return session?.kind === 'legacy'; }
 function isKdbxSession() { return session?.kind === 'kdbx'; }
 function isExternalKdbx() { return isKdbxSession() && (session.external || record?.external); }
-async function acceptKdbxOpen(u) { if(record?.external){record={...record,sidecarMeta:u.publicMeta,updatedAt:new Date().toISOString()};await putVaultRecord(record);} const vault=u.vault;if(record?.external&&record.sidecarPrefs)vault.settings={...vault.settings,...record.sidecarPrefs};session={kind:'kdbx',vault,components:u.components,publicMeta:u.publicMeta,kdbxInfo:u.info,external:Boolean(record?.external)}; }
+async function acceptKdbxOpen(u) { if(record?.external){record={...record,sidecarMeta:u.publicMeta,updatedAt:new Date().toISOString()};await putVaultRecord(record);} const vault=u.vault;if(record?.external&&record.sidecarPrefs)vault.settings={...vault.settings,...record.sidecarPrefs};session={kind:'kdbx',vault,components:u.components,publicMeta:u.publicMeta,kdbxInfo:u.info,binaries:u.binaries||new Map(),external:Boolean(record?.external)}; }
 
 function showToast(message, type = '') {
   const el = $('toast'); el.textContent = message; el.className = `toast ${type}`; el.hidden = false;
@@ -80,7 +94,9 @@ function showToast(message, type = '') {
 }
 function setPublicScreen(name) {
   for (const id of ['home','setup','unlock','veracrypt','app']) $(`screen-${id}`).hidden = id !== name;
-  $('public-brand').hidden = name === 'app' || name === 'veracrypt';
+  const fullscreen = name === 'app' || name === 'veracrypt';
+  $('public-brand').hidden = fullscreen;
+  $('public-shell').hidden = fullscreen;
 }
 function clearSecretInputs() {
   document.querySelectorAll('input[type="password"]').forEach((el) => { el.value = ''; });
@@ -96,6 +112,11 @@ async function init() {
   if (window.top !== window.self) throw new Error('Por segurança, Meu Cofre não funciona dentro de frames. Abra o endereço diretamente.');
   if (!window.isSecureContext) throw new Error('Meu Cofre exige HTTPS/contexto seguro.');
   bindEvents();
+  applyAppearance(currentAppearance());
+  if ($('setting-appearance')) $('setting-appearance').value = currentAppearance();
+  renderFormatSupport();
+  renderVcSupport();
+  populateVcCipherSelects();
   $('public-version').textContent = `v${APP_VERSION}`;
   record = await getVaultRecord();
   vcFidoProfile = await getVeraCryptFidoProfile();
@@ -139,6 +160,12 @@ function bindEvents() {
   $('lock-btn').addEventListener('click', () => lockVault('Cofre bloqueado.'));
   $('search').addEventListener('input', renderEntries);
   $('add-entry').addEventListener('click', () => openEntryModal());
+  $('toolbar-add-entry').addEventListener('click', () => openEntryModal());
+  $('setting-appearance').addEventListener('change', (e) => { applyAppearance(e.target.value); showToast('Aparência atualizada.'); });
+  $('entry-add-field').addEventListener('click', () => addEntryField());
+  $('entry-add-attachment').addEventListener('click', () => $('entry-attachment-file').click());
+  $('entry-attachment-file').addEventListener('change', (e) => addEntryAttachments([...(e.target.files || [])]));
+  $('entry-expires').addEventListener('change', () => { $('entry-expiry').disabled = !$('entry-expires').checked; });
   $('add-group').addEventListener('click', () => openGroupModal());
   $('group-all').addEventListener('click', () => selectGroup('all'));
   $('edit-current-group').addEventListener('click', () => { if(selectedGroupUuid!=='all') openGroupModal(selectedGroupUuid); });
@@ -285,10 +312,10 @@ async function createVaultFromSetup() {
       btn.textContent='Aguardando YubiKey...';
       const reg=await registerPrfCredential({webauthnUserId},'security-key'); registration=reg.registration; secret=reg.prfSecret;
     }
-    btn.textContent='Derivando chaves e criando KDBX...';
-    created=await createKdbxRecord({vault,mode,password:mode===PROTECTION_MODES.YUBIKEY?null:password,registration,prfSecret:secret,webauthnUserId});
+    btn.textContent=$('setup-kdf').value==='aes'?'Calibrando AES-KDF e criando KDBX...':'Derivando com Argon2 e criando KDBX...';
+    created=await createKdbxRecord({vault,mode,password:mode===PROTECTION_MODES.YUBIKEY?null:password,registration,prfSecret:secret,webauthnUserId,kdf:$('setup-kdf').value});
     record=created.record; await putVaultRecord(record);
-    session={kind:'kdbx',vault:created.vault,components:created.components,publicMeta:created.publicMeta,kdbxInfo:created.kdbxInfo};
+    session={kind:'kdbx',vault:created.vault,components:created.components,publicMeta:created.publicMeta,kdbxInfo:created.kdbxInfo,binaries:created.binaries||new Map()};
     clearSecretInputs(); enterApp();
     if (created.recoveryKey) { downloadRecoveryKey(created.recoveryKey); wipe(created.recoveryKey); showToast('Cofre criado. A chave de recuperação foi baixada: guarde-a separadamente.','success'); }
     else showToast('Cofre KDBX criado. Exporte um backup .kdbx.','success');
@@ -393,10 +420,103 @@ function renderGroups(){if(!session)return;ensureVaultGroups();const tree=$('gro
 }
 function populateGroupSelect(select,current=null,{exclude=new Set()}={}){ensureVaultGroups();select.replaceChildren();const root=rootGroup(),depths=groupDepthMap();const ordered=[];const walk=g=>{ordered.push(g);for(const c of childGroups(g.kdbxUuidBytes))walk(c);};walk(root);for(const g of ordered){if(exclude.has(g.kdbxUuidBytes))continue;const o=document.createElement('option');o.value=g.kdbxUuidBytes;o.textContent=`${'— '.repeat(depths.get(g.kdbxUuidBytes)||0)}${g.name||'Pasta'}`;o.selected=g.kdbxUuidBytes===current;select.append(o);}}
 function entryMatches(e,t){if(!t)return true;return[e.title,e.username,e.url,...(e.tags||[])].join(' ').toLocaleLowerCase('pt-BR').includes(t);}
-function renderEntries(){if(!session)return;ensureVaultGroups();const list=$('entry-list');list.replaceChildren();const term=$('search').value.trim().toLocaleLowerCase('pt-BR');const inGroup=e=>selectedGroupUuid==='all'||e.groupUuid===selectedGroupUuid;const entries=[...session.vault.entries].filter(e=>inGroup(e)&&entryMatches(e,term)).sort((a,b)=>Number(!!b.favorite)-Number(!!a.favorite)||String(a.title).localeCompare(String(b.title),'pt-BR'));const total=selectedGroupUuid==='all'?session.vault.entries.length:groupEntryCount(selectedGroupUuid,true);$('app-count').textContent=selectedGroupUuid==='all?`${total} ${total===1?'item':'itens'}`:`${groupByUuid(selectedGroupUuid)?.name||'Pasta'} · ${total} ${total===1?'item':'itens'}`;if(!entries.length){const d=document.createElement('div');d.className='empty';d.textContent=term?'Nenhum item encontrado nesta pasta.':'Nenhum item nesta pasta.';list.append(d);return;}for(const e of entries){const item=document.createElement('button');item.type='button';item.className='entry';item.addEventListener('click',()=>openEntryModal(e.id));const ic=document.createElement('div');ic.className='entry-icon';ic.textContent=(e.title||'?').trim().slice(0,1).toUpperCase();const main=document.createElement('div');const title=document.createElement('div');title.className='entry-title';title.textContent=e.title||'Sem título';const meta=document.createElement('div');meta.className='entry-meta';const folder=selectedGroupUuid==='all'?` · ${groupPath(e.groupUuid)}`:'';meta.textContent=(e.username||e.url||(e.tags||[]).join(', ')||'Credencial')+folder;main.append(title,meta);const fav=document.createElement('div');fav.className='favorite';fav.textContent=e.favorite?'★':'';item.append(ic,main,fav);list.append(item);}}
-function openEntryModal(id=null){if(!session)return;ensureVaultGroups();editingId=id;const e=id?session.vault.entries.find(x=>x.id===id):null;$('entry-modal-title').textContent=e?'Editar item':'Novo item';$('entry-id').value=e?.id||'';populateGroupSelect($('entry-group'),e?.groupUuid||(selectedGroupUuid==='all'?rootGroup().kdbxUuidBytes:selectedGroupUuid));$('entry-title').value=e?.title||'';$('entry-username').value=e?.username||'';$('entry-password').value=e?.password||'';$('entry-password').type='password';$('entry-show-password').textContent='Mostrar';$('entry-url').value=e?.url||'';$('entry-tags').value=(e?.tags||[]).join(', ');$('entry-totp').value=e?.totpSecret||'';$('entry-notes').value=e?.notes||'';$('entry-favorite').checked=!!e?.favorite;$('entry-delete').hidden=!e;$('entry-quick-actions').hidden=!e;$('entry-generate-password').hidden=false;$('entry-form').querySelector('button[type="submit"]').hidden=false;for(const id2 of ['entry-title','entry-username','entry-password','entry-url','entry-tags','entry-totp','entry-notes'])$(id2).readOnly=false;$('entry-favorite').disabled=false;$('entry-modal').hidden=false;updateTotpBox();setTimeout(()=>$('entry-title').focus(),80);}
-function closeEntryModal(){if(!$('entry-modal'))return;$('entry-modal').hidden=true;editingId=null;stopTotpTimer();$('entry-form').reset();$('entry-totp-box').hidden=true;}
-async function saveEntryFromForm(event){event.preventDefault();if(!session)return;const title=$('entry-title').value.trim();if(!title)return showToast('Informe um título.','error');const now=new Date().toISOString(),existing=editingId?session.vault.entries.find(e=>e.id===editingId):null;const e={id:existing?.id||uuid(),kdbxUuidBytes:existing?.kdbxUuidBytes,groupUuid:$('entry-group').value||rootGroup().kdbxUuidBytes,title,username:$('entry-username').value,password:$('entry-password').value,url:$('entry-url').value.trim(),tags:$('entry-tags').value.split(',').map(x=>x.trim()).filter(Boolean).slice(0,30),totpSecret:$('entry-totp').value.trim().replace(/\s+/g,''),notes:$('entry-notes').value,favorite:$('entry-favorite').checked,createdAt:existing?.createdAt||now,updatedAt:now};if(existing)Object.assign(existing,e);else session.vault.entries.push(e);try{await persistVault();closeEntryModal();renderGroups();renderEntries();showToast(isExternalKdbx()?'Item salvo mantendo a estrutura KeePassXC. Exporte o KDBX para atualizar o arquivo externo.':'Item salvo no cofre criptografado.','success');}catch(err){showToast(err.message||String(err),'error');}}
+function renderEntries(){if(!session)return;ensureVaultGroups();const list=$('entry-list');list.replaceChildren();const term=$('search').value.trim().toLocaleLowerCase('pt-BR');const inGroup=e=>selectedGroupUuid==='all'||e.groupUuid===selectedGroupUuid;const entries=[...session.vault.entries].filter(e=>inGroup(e)&&entryMatches(e,term)).sort((a,b)=>Number(!!b.favorite)-Number(!!a.favorite)||String(a.title).localeCompare(String(b.title),'pt-BR'));const total=selectedGroupUuid==='all'?session.vault.entries.length:groupEntryCount(selectedGroupUuid,true);$('app-count').textContent=selectedGroupUuid==='all'?`${total} ${total===1?'item':'itens'}`:`${groupByUuid(selectedGroupUuid)?.name||'Pasta'} · ${total} ${total===1?'item':'itens'}`;if(!entries.length){const d=document.createElement('div');d.className='empty';d.textContent=term?'Nenhum item encontrado nesta pasta.':'Nenhum item nesta pasta.';list.append(d);return;}for(const e of entries){const item=document.createElement('button');item.type='button';item.className='entry';item.addEventListener('click',()=>openEntryModal(e.id));const ic=document.createElement('div');ic.className='entry-icon';ic.textContent=(e.title||'?').trim().slice(0,1).toUpperCase();const main=document.createElement('div');const title=document.createElement('div');title.className='entry-title';title.textContent=e.title||'Sem título';const meta=document.createElement('div');meta.className='entry-meta';const folder=selectedGroupUuid==='all'?` · ${groupPath(e.groupUuid)}`:'';meta.textContent=(e.username||e.url||(e.tags||[]).join(', ')||'Credencial')+folder;main.append(title,meta);const fav=document.createElement('div');fav.className='favorite';fav.textContent=e.favorite?'★':'';item.append(ic,main,fav);list.append(item);}}
+/* ---------- campos personalizados do KeePassXC ---------- */
+function renderEntryFields(){
+  const box=$('entry-fields');box.replaceChildren();
+  if(!entryFields.length){const empty=document.createElement('div');empty.className='hint';empty.textContent='Nenhum campo personalizado.';box.append(empty);}
+  entryFields.forEach((field,index)=>{
+    const row=document.createElement('div');row.className='kv-row';
+    const key=document.createElement('input');key.value=field.key;key.placeholder='Nome do campo';key.maxLength=200;
+    key.addEventListener('input',()=>{entryFields[index].key=key.value;});
+    const value=document.createElement('input');value.value=field.value;value.placeholder='Valor';value.type=field.protected?'password':'text';value.autocapitalize='none';value.spellcheck=false;
+    value.addEventListener('input',()=>{entryFields[index].value=value.value;});
+    const tools=document.createElement('div');tools.className='actions';
+    const lock=document.createElement('button');lock.type='button';lock.className='btn ghost small';lock.textContent=field.protected?'Protegido':'Visível';
+    lock.title='Alternar a proteção do valor pelo stream interno do KDBX';
+    lock.addEventListener('click',()=>{entryFields[index].protected=!entryFields[index].protected;renderEntryFields();});
+    const del=document.createElement('button');del.type='button';del.className='btn danger small';del.textContent='Remover';
+    del.addEventListener('click',()=>{entryFields.splice(index,1);renderEntryFields();});
+    tools.append(lock,del);
+    row.append(key,value,tools);box.append(row);
+  });
+  $('entry-fields-details').open=entryFields.length>0;
+}
+function addEntryField(){
+  if(entryFields.length>=64)return showToast('Limite de campos personalizados atingido.','error');
+  entryFields.push({key:'',value:'',protected:false});renderEntryFields();
+  $('entry-fields-details').open=true;
+}
+
+/* ---------- anexos ---------- */
+function renderEntryAttachments(){
+  const box=$('entry-attachments');box.replaceChildren();
+  if(!entryAttachments.length){const empty=document.createElement('div');empty.className='hint';empty.textContent='Nenhum anexo.';box.append(empty);}
+  entryAttachments.forEach((item,index)=>{
+    const row=document.createElement('div');row.className='attach-row';
+    const icon=document.createElement('span');icon.className='attach-icon';icon.textContent='◫';
+    const name=document.createElement('span');name.className='attach-name';name.textContent=item.key||'(sem nome)';
+    const size=document.createElement('span');size.className='attach-size';
+    const bytes=item.data instanceof Uint8Array?item.data.length:item.size;
+    size.textContent=bytes==null?(item.ref==null?'novo':'—'):formatBytes(bytes);
+    const tools=document.createElement('span');tools.className='actions';
+    const save=document.createElement('button');save.type='button';save.className='btn secondary small';save.textContent='Salvar';
+    save.addEventListener('click',()=>exportEntryAttachment(index));
+    const del=document.createElement('button');del.type='button';del.className='btn danger small';del.textContent='Remover';
+    del.addEventListener('click',()=>{entryAttachments.splice(index,1);renderEntryAttachments();});
+    tools.append(save,del);
+    row.append(icon,name,size,tools);box.append(row);
+  });
+  $('entry-attachments-details').open=entryAttachments.length>0;
+}
+async function addEntryAttachments(files){
+  try{
+    for(const file of files){
+      if(entryAttachments.length>=64)throw new Error('Limite de 64 anexos por item.');
+      if(file.size>32*1024*1024)throw new Error(`“${file.name}” passa de 32 MB.`);
+      const data=new Uint8Array(await file.arrayBuffer());
+      entryAttachments.push({key:file.name,ref:null,size:data.length,data});
+    }
+    renderEntryAttachments();
+    if(files.length)showToast('Anexo pronto. Salve o item para gravá-lo no KDBX.','success');
+  }catch(e){showToast(e.message||String(e),'error');}
+  finally{$('entry-attachment-file').value='';}
+}
+async function exportEntryAttachment(index){
+  const item=entryAttachments[index];if(!item)return;
+  try{
+    const bytes=attachmentBytes(session?.binaries,item);
+    const safe=(item.key||'anexo').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').slice(0,200)||'anexo';
+    await saveBlob(new Blob([bytes],{type:'application/octet-stream'}),safe);
+    wipe(bytes);
+    showToast('Anexo exportado em texto claro fora do cofre.','success');
+  }catch(e){showToast(e.message||String(e),'error');}
+}
+function renderEntryMeta(e){
+  const box=$('entry-meta');box.replaceChildren();
+  if(!e)return;
+  const lines=[];
+  if(e.createdAt)lines.push(`Criado em ${formatDateTime(e.createdAt)}`);
+  if(e.updatedAt)lines.push(`Alterado em ${formatDateTime(e.updatedAt)}`);
+  if(e.historyCount)lines.push(`${e.historyCount} versão(ões) no histórico do KDBX`);
+  for(const line of lines){const div=document.createElement('div');div.textContent=line;box.append(div);}
+}
+
+function openEntryModal(id=null){if(!session)return;ensureVaultGroups();editingId=id;const e=id?session.vault.entries.find(x=>x.id===id):null;$('entry-modal-title').textContent=e?'Editar item':'Novo item';$('entry-id').value=e?.id||'';populateGroupSelect($('entry-group'),e?.groupUuid||(selectedGroupUuid==='all'?rootGroup().kdbxUuidBytes:selectedGroupUuid));$('entry-title').value=e?.title||'';$('entry-username').value=e?.username||'';$('entry-password').value=e?.password||'';$('entry-password').type='password';$('entry-show-password').textContent='Mostrar';$('entry-url').value=e?.url||'';$('entry-tags').value=(e?.tags||[]).join(', ');$('entry-totp').value=e?.totpSecret||'';$('entry-notes').value=e?.notes||'';$('entry-favorite').checked=!!e?.favorite;
+  entryFields=(e?.fields||[]).map(f=>({key:f.key,value:f.value,protected:Boolean(f.protected)}));
+  entryAttachments=(e?.attachments||[]).map(a=>({...a}));
+  renderEntryFields();renderEntryAttachments();renderEntryMeta(e);
+  $('entry-expires').checked=Boolean(e?.expires);
+  $('entry-expiry').value=e?.expires&&e?.expiryTime?String(e.expiryTime).slice(0,10):'';
+  $('entry-expiry').disabled=!$('entry-expires').checked;
+  $('entry-delete').hidden=!e;$('entry-quick-actions').hidden=!e;$('entry-generate-password').hidden=false;$('entry-form').querySelector('button[type="submit"]').hidden=false;for(const id2 of ['entry-title','entry-username','entry-password','entry-url','entry-tags','entry-totp','entry-notes'])$(id2).readOnly=false;$('entry-favorite').disabled=false;$('entry-modal').hidden=false;updateTotpBox();setTimeout(()=>$('entry-title').focus(),80);}
+function closeEntryModal(){if(!$('entry-modal'))return;$('entry-modal').hidden=true;editingId=null;stopTotpTimer();$('entry-form').reset();$('entry-totp-box').hidden=true;entryFields=[];entryAttachments=[];$('entry-fields')?.replaceChildren();$('entry-attachments')?.replaceChildren();$('entry-meta')?.replaceChildren();}
+async function saveEntryFromForm(event){event.preventDefault();if(!session)return;const title=$('entry-title').value.trim();if(!title)return showToast('Informe um título.','error');const now=new Date().toISOString(),existing=editingId?session.vault.entries.find(e=>e.id===editingId):null;const expires=$('entry-expires').checked,expiryRaw=$('entry-expiry').value;
+  if(expires&&!expiryRaw)return showToast('Informe a data de expiração ou desmarque a opção.','error');
+  const fields=entryFields.map(f=>({key:String(f.key||'').trim(),value:String(f.value??''),protected:Boolean(f.protected)})).filter(f=>f.key);
+  const seen=new Set();
+  for(const f of fields){if(seen.has(f.key))return showToast(`O campo personalizado “${f.key}” está duplicado.`,'error');seen.add(f.key);}
+  const e={id:existing?.id||uuid(),kdbxUuidBytes:existing?.kdbxUuidBytes,groupUuid:$('entry-group').value||rootGroup().kdbxUuidBytes,title,username:$('entry-username').value,password:$('entry-password').value,url:$('entry-url').value.trim(),tags:$('entry-tags').value.split(',').map(x=>x.trim()).filter(Boolean).slice(0,30),totpSecret:$('entry-totp').value.trim().replace(/\s+/g,''),notes:$('entry-notes').value,favorite:$('entry-favorite').checked,fields,attachments:entryAttachments,iconId:existing?.iconId||'0',expires,expiryTime:expires?new Date(`${expiryRaw}T23:59:59Z`).toISOString():null,historyCount:existing?.historyCount||0,createdAt:existing?.createdAt||now,updatedAt:now};if(existing)Object.assign(existing,e);else session.vault.entries.push(e);try{await persistVault();closeEntryModal();renderGroups();renderEntries();showToast(isExternalKdbx()?'Item salvo mantendo a estrutura KeePassXC. Exporte o KDBX para atualizar o arquivo externo.':'Item salvo no cofre criptografado.','success');}catch(err){showToast(err.message||String(err),'error');}}
 async function deleteCurrentEntry(){if(!session||!editingId)return;const e=session.vault.entries.find(x=>x.id===editingId);if(!confirm(`Excluir “${e?.title||'este item'}”?`))return;session.vault.entries=session.vault.entries.filter(x=>x.id!==editingId);await persistVault();closeEntryModal();renderGroups();renderEntries();showToast('Item excluído.');}
 function toggleEntryPassword(){const i=$('entry-password');i.type=i.type==='password'?'text':'password';$('entry-show-password').textContent=i.type==='password'?'Mostrar':'Ocultar';}
 function openCurrentUrl(){const url=safeHttpUrl($('entry-url').value);if(!url)return showToast('URL inválida ou não permitida.','error');window.open(url.href,'_blank','noopener,noreferrer');}
@@ -511,7 +631,7 @@ async function createVcLinkedProfileFromExisting(){
   try{
     btn.disabled=true;btn.textContent='Validando o container...';
     bundle=await buildCredentialBundle({password:$('vc-link-password').value,pim:$('vc-link-pim').value,hash:$('vc-link-kdf').value,hidden:$('vc-link-volume-type').value==='hidden',keyfiles:vcLinkKeyfiles});
-    volume=await openVeraCryptFile(vcLinkSelectedFile,{password:bundle.password,pim:bundle.pim,hash:bundle.hash,hidden:bundle.hidden,keyfiles:vcLinkKeyfiles});volume.close();volume=null;
+    volume=await openVeraCryptFile(vcLinkSelectedFile,{password:bundle.password,pim:bundle.pim,hash:bundle.hash,cipher:$('vc-link-cipher').value,hidden:bundle.hidden,keyfiles:vcLinkKeyfiles,onStatus:(m)=>{btn.textContent=m.length>42?'Validando o container...':m;}});volume.close();volume=null;
     btn.textContent='Cadastre a YubiKey 1...';
     const reg=await registerPrfCredential({webauthnUserId:bytesToBase64(crypto.getRandomValues(new Uint8Array(32)))},'security-key');prf=reg.prfSecret;reg.registration.label='YubiKey 1';
     btn.textContent='Cifrando as credenciais...';
@@ -712,6 +832,7 @@ function vcCurrentCredentials(){
     password:$('vc-password').value,
     pim:$('vc-pim').value,
     hash:$('vc-kdf').value,
+    cipher:$('vc-cipher').value,
     hidden:$('vc-volume-type').value==='hidden',
     keyfiles:vcKeyfiles
   };
@@ -819,25 +940,49 @@ function renderVcMetadata(fileSystemError=null){
   $('vc-metadata').replaceChildren();
   const i=vcVolume?.info||{};
   addVcMeta('Container',vcSelectedFile?.name||'—');
-  addVcMeta('Criptografia','AES-256-XTS');
-  addVcMeta('KDF',`${i.hash||'—'} · ${Number(i.iterations||0).toLocaleString('pt-BR')} iterações${i.pim?` · PIM ${i.pim}`:''}`);
+  addVcMeta('Criptografia',i.cipherDetail||`${i.algorithmName||'AES'}-XTS`);
+  addVcMeta('KDF',`PBKDF2-${i.hash||'—'} · ${Number(i.iterations||0).toLocaleString('pt-BR')} iterações${i.pim?` · PIM ${i.pim}`:''}`);
   addVcMeta('Cabeçalho',`${i.hidden?'oculto':'normal'} · versão ${i.headerVersion??'—'} · ${i.headerSource||'primário'}`);
   addVcMeta('Volume',formatVcBytes(i.volumeSize||0));
   addVcMeta('Área criptografada',`${formatVcBytes(i.encryptedAreaLength||0)} a partir de ${formatVcBytes(i.encryptedAreaStart||0)}`);
   addVcMeta('Setor',`${i.sectorSize||512} bytes`);
-  addVcMeta('Sistema de arquivos',vcFs?.info?.type||(fileSystemError?`não suportado (${fileSystemError.message||fileSystemError})`:'não identificado'));
+  addVcMeta('Sistema de arquivos',vcFs?.info?.type||(fileSystemError?`não reconhecido (${fileSystemError.message||fileSystemError})`:'não identificado'));
+  if(vcVolume)addVcMeta('Numeração XTS',`unidade base ${vcVolume.dataUnitBase} · setores de ${i.sectorSize||512} bytes`);
 }
-async function openVcUsing({password='',keyfiles=[],pim=null,hash=null,hidden=null,button,statusPrefix='Lendo cabeçalho e derivando a chave localmente.'}={}){
+/**
+ * Abre o sistema de arquivos interno. A numeração de unidades XTS confirmada
+ * contra o VeraCrypt oficial é a absoluta, mas se ela não render um sistema de
+ * arquivos reconhecível tentamos a alternativa antes de desistir do volume.
+ */
+async function openVolumeFileSystem(volume){
+  let firstError=null;
+  for(const base of volume.candidateDataUnitBases()){
+    volume.setDataUnitBase(base);
+    try{return await openSupportedFileSystem(volume);}
+    catch(e){firstError=firstError||e;}
+  }
+  volume.setDataUnitBase(volume.candidateDataUnitBases()[0]);
+  throw firstError||new Error('Sistema de arquivos interno não reconhecido.');
+}
+async function openVcUsing({password='',keyfiles=[],pim=null,hash=null,cipher=null,hidden=null,button,statusPrefix='Lendo cabeçalho e derivando a chave localmente.'}={}){
   if(!vcSelectedFile)return showToast('Selecione um container VeraCrypt.','error');
   const btn=button||$('vc-open');const old=btn.textContent;btn.disabled=true;btn.textContent='Derivando chave...';
   resetVcOpenedState();
   let volume=null;
   try{
     $('vc-status').textContent=`${statusPrefix} Arquivos grandes não são enviados para nenhum servidor.`;
-    volume=await openVeraCryptFile(vcSelectedFile,{password,pim:pim??$('vc-pim').value,keyfiles,hash:hash??$('vc-kdf').value,hidden:hidden??($('vc-volume-type').value==='hidden')});
+    volume=await openVeraCryptFile(vcSelectedFile,{
+      password,
+      pim:pim??$('vc-pim').value,
+      keyfiles,
+      hash:hash??$('vc-kdf').value,
+      cipher:cipher??$('vc-cipher').value,
+      hidden:hidden??($('vc-volume-type').value==='hidden'),
+      onStatus:(message)=>{$('vc-status').textContent=message;}
+    });
     vcVolume=volume;volume=null;
     let fsError=null;
-    try{vcFs=await openSupportedFileSystem(vcVolume);}catch(e){fsError=e;vcFs=null;}
+    try{vcFs=await openVolumeFileSystem(vcVolume);}catch(e){fsError=e;vcFs=null;}
     $('vc-open-area').hidden=false;
     $('vc-browser-section').hidden=!vcFs;
     renderVcMetadata(fsError);
@@ -846,9 +991,9 @@ async function openVcUsing({password='',keyfiles=[],pim=null,hash=null,hidden=nu
     if(vcFs){
       vcPath=[{name:'Raiz',locator:null}];
       await renderVcDirectory();
-      $('vc-status').textContent=`Volume aberto em modo somente leitura · ${vcFs.info.type}.`;
+      $('vc-status').textContent=`Volume aberto em modo somente leitura · ${vcVolume.info.algorithmName} · ${vcFs.info.type}.`;
     }else{
-      $('vc-status').textContent='Cabeçalho VeraCrypt aberto, mas o sistema de arquivos interno ainda não é suportado nesta versão.';
+      $('vc-status').textContent=`Cabeçalho VeraCrypt aberto (${vcVolume.info.algorithmName} / ${vcVolume.info.hash}), mas o sistema de arquivos interno não foi reconhecido: ${fsError?.message||'formato desconhecido'}`;
     }
     return true;
   }catch(e){
@@ -861,6 +1006,12 @@ async function openVcUsing({password='',keyfiles=[],pim=null,hash=null,hidden=nu
 }
 async function openVcContainer(){
   return openVcUsing({password:$('vc-password').value,keyfiles:vcKeyfiles,button:$('vc-open')});
+}
+function vcHashHint(){
+  const value=$('vc-kdf').value;
+  return value==='Whirlpool'||value==='BLAKE2s-256'||value==='todos'
+    ? ' O PBKDF2 desse hash roda em JavaScript: no iPhone pode levar mais de um minuto.'
+    : '';
 }
 async function openVcWithFido(){
   const btn=$('vc-fido-open');let secret=null;
@@ -925,7 +1076,17 @@ async function vcExportFile(entry){
   finally{bytes&&wipe(bytes);}
 }
 
-async function persistVault(){if(!session)return;session.vault.updatedAt=new Date().toISOString();if(isLegacySession())record=await legacySaveRecord(record,session.vaultKey,session.vault);else record=await saveStoredKdbx(record,session.vault,session.components,session.publicMeta,session.kdbxInfo?.rounds);await putVaultRecord(record);}
+async function persistVault(){
+  if(!session)return;
+  session.vault.updatedAt=new Date().toISOString();
+  if(isLegacySession())record=await legacySaveRecord(record,session.vaultKey,session.vault);
+  else {
+    const saved=await saveStoredKdbx(record,session.vault,session.components,session.publicMeta,session.kdbxInfo?.rounds,session.binaries);
+    record=saved.record;
+    if(saved.binaries)session.binaries=saved.binaries;
+  }
+  await putVaultRecord(record);
+}
 
 async function copyText(value,message){if(!value)return;try{await navigator.clipboard.writeText(value);showToast(message,'success');clearTimeout(clipboardTimer);const sec=clampInt(session?.vault.settings?.clipboardClearSeconds,0,300,20);if(sec>0)clipboardTimer=setTimeout(async()=>{try{const current=await navigator.clipboard.readText();if(current===value)await navigator.clipboard.writeText('');}catch{}},sec*1000);}catch{showToast('Não foi possível copiar para a área de transferência.','error');}}
 function generateNewPassword(){try{$('generated-password').textContent=generatePassword({length:clampInt($('gen-length').value,8,128,24),lower:$('gen-lower').checked,upper:$('gen-upper').checked,digits:$('gen-digits').checked,symbols:$('gen-symbols').checked});}catch(e){showToast(e.message,'error');}}
@@ -943,14 +1104,48 @@ function renderKdbxSlots(){const slots=session.publicMeta.slots||[];if(!slots.le
 function renderLegacySlots(){for(const slot of record.slots||[]){if(slot.type==='password')continue;const r=document.createElement('div');r.className='row';const m=document.createElement('div');m.className='row-main';const t=document.createElement('div');t.className='row-title';t.textContent=slot.label||'YubiKey';const s=document.createElement('div');s.className='row-sub';s.textContent='Credencial legada; pode ser reutilizada durante a migração.';m.append(t,s);r.append(m);$('auth-slots').append(r);}}
 function renderLegacyMigrationChoices(){const select=$('migration-yubikey');select.replaceChildren();const seen=new Set();for(const slot of record.slots||[]){if(slot.kind!=='security-key'||!slot.credentialId||seen.has(slot.credentialId))continue;seen.add(slot.credentialId);const o=document.createElement('option');o.value=slot.id;o.textContent=slot.label||'YubiKey';select.append(o);}if(!select.options.length){const o=document.createElement('option');o.value='';o.textContent='Nenhuma YubiKey legada disponível';select.append(o);}renderMigrationMode();}
 
-async function renderDiagnostics(){const box=$('security-diagnostics');box.replaceChildren();let persisted=false;try{persisted=await navigator.storage?.persisted?.();}catch{}const items=[['HTTPS / contexto seguro',window.isSecureContext],['WebCrypto',!!crypto?.subtle],['WebAuthn',!!(window.PublicKeyCredential&&navigator.credentials)],['Service Worker / offline','serviceWorker'in navigator],['Armazenamento persistente concedido',!!persisted],['App instalado',matchMedia('(display-mode: standalone)').matches||navigator.standalone===true],['Autenticador do dispositivo',await platformAuthenticatorAvailable()]];for(const [label,ok] of items){const r=document.createElement('div');r.className='row';const t=document.createElement('div');t.className='row-title';t.textContent=label;const p=document.createElement('span');p.className=`pill ${ok?'ok':'bad'}`;p.textContent=ok?'OK':'Não';r.append(t,p);box.append(r);}}
+function supportRow(box,label,value,tone=''){
+  const row=document.createElement('div');row.className='row';
+  const main=document.createElement('div');main.className='row-main';
+  const title=document.createElement('div');title.className='row-title';title.textContent=label;
+  const sub=document.createElement('div');sub.className='row-sub';sub.textContent=value;
+  main.append(title,sub);row.append(main);
+  if(tone){const pill=document.createElement('span');pill.className=`pill ${tone}`;pill.textContent=tone==='ok'?'Compatível':'Fora do escopo';row.append(pill);}
+  box.append(row);
+}
+function renderFormatSupport(){
+  const box=$('format-support');if(!box)return;box.replaceChildren();
+  supportRow(box,'KDBX','Versões 3.1 e 4.x, leitura e gravação. AES-256-CBC, ChaCha20 e Twofish-256-CBC; AES-KDF, Argon2d e Argon2id.','ok');
+  supportRow(box,'Estrutura KeePassXC','Grupos aninhados, campos personalizados (protegidos ou não), anexos, expiração, tags, histórico e ícones preservados.','ok');
+  supportRow(box,'Arquivo de chave','XML v1 e v2, 32 bytes crus, 64 caracteres hexadecimais e SHA-256 de qualquer arquivo.','ok');
+  supportRow(box,'TOTP','Lê e grava TimeOtp-Secret-Base32, o campo otp com otpauth:// e o TOTP Seed antigo do KeePassXC.','ok');
+  supportRow(box,'Challenge-Response HMAC-SHA1 da YubiKey','Não é FIDO2: continua exigindo o KeePassXC nativo com a YubiKey em modo HMAC.','bad');
+}
+function renderVcSupport(){
+  const box=$('vc-support');if(!box)return;box.replaceChildren();
+  supportRow(box,'Cifradores XTS',ENCRYPTION_ALGORITHM_NAMES.join(', '),'ok');
+  supportRow(box,'Hash do KDF (PBKDF2)',`${VERACRYPT_HASHES.join(', ')}. SHA-512 e SHA-256 usam o WebCrypto; Whirlpool e BLAKE2s-256 rodam em JavaScript e levam dezenas de segundos.`,'ok');
+  supportRow(box,'Sistemas de arquivos lidos',SUPPORTED_FILE_SYSTEMS.join(' · '),'ok');
+  supportRow(box,'Volumes','Containers em arquivo, normais e ocultos, com PIM e keyfiles. Volumes de sistema e de disco inteiro ficam de fora.','ok');
+  supportRow(box,'Fora do escopo',`${UNSUPPORTED_ENCRYPTION_ALGORITHMS.join(', ')}; KDF Streebog; APFS dentro do container; escrita de arquivos.`,'bad');
+}
+function populateVcCipherSelects(){
+  for(const id of ['vc-cipher','vc-link-cipher']){
+    const select=$(id);if(!select)continue;
+    select.replaceChildren();
+    const auto=document.createElement('option');auto.value='auto';auto.textContent='Detectar automaticamente';select.append(auto);
+    for(const name of ENCRYPTION_ALGORITHM_NAMES){const o=document.createElement('option');o.value=name;o.textContent=name;select.append(o);}
+  }
+}
 
-async function addWebAuthnMethod(kind){if(!isKdbxSession())return showToast('Migre primeiro para KDBX 4.1.','error');const pseudo={webauthnUserId:session.publicMeta.webauthnUserId};let secret=null;try{const reg=await registerPrfCredential(pseudo,kind);secret=reg.prfSecret;const result=await addPrfSlotToKdbx(record,session,reg.registration,secret);record=result.record;session.publicMeta=result.publicMeta;await putVaultRecord(record);renderSecurity();showToast(isExternalKdbx()?`${reg.registration.label} adicionada como desbloqueio FIDO2 alternativo; o KDBX original não foi alterado.`:`${reg.registration.label} adicionada.`, 'success');}catch(e){showToast(e.message||String(e),'error');}finally{secret&&wipe(secret);}}
-async function removeKdbxSlot(slotId){if(!confirm('Remover este método? Confirme que você possui outra YubiKey ou a chave de recuperação quando aplicável.'))return;try{const r=await removePrfSlotFromKdbx(record,session,slotId);record=r.record;session.publicMeta=r.publicMeta;await putVaultRecord(record);renderSecurity();showToast('Método removido.');}catch(e){showToast(e.message||String(e),'error');}}
-function downloadRecoveryKey(bytes){downloadBlob(new Blob([bytes],{type:'application/octet-stream'}),`MeuCofre-Recovery-${new Date().toISOString().slice(0,10)}.key`);}
+async function renderDiagnostics(){const box=$('security-diagnostics');box.replaceChildren();let persisted=false;try{persisted=await navigator.storage?.persisted?.();}catch{}const items=[['HTTPS / contexto seguro',window.isSecureContext],['WebCrypto',!!crypto?.subtle],['WebAuthn',!!(window.PublicKeyCredential&&navigator.credentials)],['Service Worker / offline','serviceWorker'in navigator],['Armazenamento persistente concedido',!!persisted],['App instalado',matchMedia('(display-mode: standalone)').matches||navigator.standalone===true],['Autenticador do dispositivo',await platformAuthenticatorAvailable()],['Compartilhar arquivos com o iOS/macOS',typeof navigator.canShare==='function']];for(const [label,ok] of items){const r=document.createElement('div');r.className='row';const t=document.createElement('div');t.className='row-title';t.textContent=label;const p=document.createElement('span');p.className=`pill ${ok?'ok':'bad'}`;p.textContent=ok?'OK':'Não';r.append(t,p);box.append(r);}}
+
+async function addWebAuthnMethod(kind){if(!isKdbxSession())return showToast('Migre primeiro para KDBX 4.1.','error');const pseudo={webauthnUserId:session.publicMeta.webauthnUserId};let secret=null;try{const reg=await registerPrfCredential(pseudo,kind);secret=reg.prfSecret;const result=await addPrfSlotToKdbx(record,session,reg.registration,secret);record=result.record;session.publicMeta=result.publicMeta;if(result.binaries)session.binaries=result.binaries;await putVaultRecord(record);renderSecurity();showToast(isExternalKdbx()?`${reg.registration.label} adicionada como desbloqueio FIDO2 alternativo; o KDBX original não foi alterado.`:`${reg.registration.label} adicionada.`, 'success');}catch(e){showToast(e.message||String(e),'error');}finally{secret&&wipe(secret);}}
+async function removeKdbxSlot(slotId){if(!confirm('Remover este método? Confirme que você possui outra YubiKey ou a chave de recuperação quando aplicável.'))return;try{const r=await removePrfSlotFromKdbx(record,session,slotId);record=r.record;session.publicMeta=r.publicMeta;if(r.binaries)session.binaries=r.binaries;await putVaultRecord(record);renderSecurity();showToast('Método removido.');}catch(e){showToast(e.message||String(e),'error');}}
+function downloadRecoveryKey(bytes){saveBlob(new Blob([bytes],{type:'application/octet-stream'}),`MeuCofre-Recovery-${new Date().toISOString().slice(0,10)}.key`);}
 function exportRecoveryKey(){if(!isKdbxSession())return;try{const b=exportRecoveryKeyBytes(session);downloadRecoveryKey(b);wipe(b);showToast('Chave de recuperação exportada. Guarde-a separadamente.','success');}catch(e){showToast(e.message||String(e),'error');}}
-async function changeMaster(){if(!isKdbxSession())return;const a=$('new-master').value,b=$('new-master2').value;try{requireStrongEnough(a);if(a!==b)throw new Error('As senhas não coincidem.');const r=await changeKdbxMasterPassword(record,session,a);for(const c of session.components||[])wipe(c);record=r.record;session.components=r.components;await putVaultRecord(record);clearSecretInputs();renderSecurity();showToast('Senha mestra alterada e KDBX recriptografado. Exporte um novo backup.','success');}catch(e){showToast(e.message||String(e),'error');}}
-function exportKdbx(){if(!isKdbxRecord(record))return showToast('Migre primeiro para KDBX.','error');try{const b=storedRecordBytes(record);const original=String(record.fileName||'MeuCofre.kdbx').replace(/\.kdbx$/i,'').replace(/[^A-Za-z0-9._ -]+/g,'_').slice(0,180)||'MeuCofre';const name=isExternalKdbx()?`${original}-atualizado.kdbx`:`MeuCofre-${new Date().toISOString().slice(0,10)}.kdbx`;downloadBlob(new Blob([b],{type:'application/octet-stream'}),name);wipe(b);showToast('KDBX exportado.','success');}catch(e){showToast(e.message||String(e),'error');}}
+async function changeMaster(){if(!isKdbxSession())return;const a=$('new-master').value,b=$('new-master2').value;try{requireStrongEnough(a);if(a!==b)throw new Error('As senhas não coincidem.');const r=await changeKdbxMasterPassword(record,session,a);for(const c of session.components||[])wipe(c);record=r.record;session.components=r.components;if(r.binaries)session.binaries=r.binaries;await putVaultRecord(record);clearSecretInputs();renderSecurity();showToast('Senha mestra alterada e KDBX recriptografado. Exporte um novo backup.','success');}catch(e){showToast(e.message||String(e),'error');}}
+function exportKdbx(){if(!isKdbxRecord(record))return showToast('Migre primeiro para KDBX.','error');try{const b=storedRecordBytes(record);const original=String(record.fileName||'MeuCofre.kdbx').replace(/\.kdbx$/i,'').replace(/[^A-Za-z0-9._ -]+/g,'_').slice(0,180)||'MeuCofre';const name=isExternalKdbx()?`${original}-atualizado.kdbx`:`MeuCofre-${new Date().toISOString().slice(0,10)}.kdbx`;saveBlob(new Blob([b],{type:'application/octet-stream'}),name);wipe(b);showToast('KDBX exportado.','success');}catch(e){showToast(e.message||String(e),'error');}}
 
 async function migrateLegacyToKdbx(){if(!isLegacySession())return;const mode=$('migration-mode').value;const password=$('migration-password').value,repeat=$('migration-password2').value;if(mode!==PROTECTION_MODES.YUBIKEY){try{requireStrongEnough(password);}catch(e){return showToast(e.message,'error');}if(password!==repeat)return showToast('As senhas não coincidem.','error');}
   const btn=$('migrate-kdbx');btn.disabled=true;btn.textContent='Preparando migração...';let secret=null,recovery=null;
@@ -960,11 +1155,11 @@ async function migrateLegacyToKdbx(){if(!isLegacySession())return;const mode=$('
     let registration=null,webauthnUserId=record.webauthnUserId||bytesToBase64(crypto.getRandomValues(new Uint8Array(32)));
     if(mode!==PROTECTION_MODES.PASSWORD){const slotId=$('migration-yubikey').value;const slot=(record.slots||[]).find(s=>s.id===slotId);if(!slot)throw new Error('Selecione uma YubiKey existente ou cadastre uma na versão antiga antes da migração.');btn.textContent='Toque na YubiKey...';secret=await evaluatePrf(slot);registration={kind:'security-key',label:slot.label||'YubiKey / chave FIDO2',credentialId:slot.credentialId,transports:slot.transports||[],prfSalt:slot.prfSalt};}
     const vault=migrateLegacyVaultData(session.vault);btn.textContent='Gerando KDBX 4.1...';const created=await createKdbxRecord({vault,mode,password:mode===PROTECTION_MODES.YUBIKEY?null:password,registration,prfSecret:secret,webauthnUserId});recovery=created.recoveryKey;
-    if(session.vaultKey)wipe(session.vaultKey);record=created.record;session={kind:'kdbx',vault:created.vault,components:created.components,publicMeta:created.publicMeta,kdbxInfo:created.kdbxInfo};await putVaultRecord(record);clearSecretInputs();renderSecurity();renderEntries();renderUnlockMethods();
+    if(session.vaultKey)wipe(session.vaultKey);record=created.record;session={kind:'kdbx',vault:created.vault,components:created.components,publicMeta:created.publicMeta,kdbxInfo:created.kdbxInfo,binaries:created.binaries||new Map()};await putVaultRecord(record);clearSecretInputs();renderSecurity();renderEntries();renderUnlockMethods();
     const k=storedRecordBytes(record);downloadBlob(new Blob([k],{type:'application/octet-stream'}),`MeuCofre-MIGRADO-${new Date().toISOString().slice(0,10)}.kdbx`);wipe(k);if(recovery){downloadRecoveryKey(recovery);wipe(recovery);recovery=null;}showToast('Migração concluída. Foram baixados o backup antigo e o novo KDBX; guarde-os até validar a abertura.','success');
   }catch(e){showToast(e.message||String(e),'error');}finally{secret&&wipe(secret);recovery&&wipe(recovery);btn.disabled=false;btn.textContent='Fazer backup antigo e migrar para KDBX';}}
 
-async function importKdbxFile(file,replaceExisting){if(!file)return;try{const bytes=new Uint8Array(await file.arrayBuffer());const info=inspectKdbx(bytes);const detail=info.kdf==='AES-KDF'?`${Number(info.rounds||0).toLocaleString('pt-BR')} rodadas`:`${info.iterations||'?'} iterações, ${Math.round(Number(info.memoryBytes||0)/1048576)} MiB, p=${info.parallelism||1}`;if(!confirm(`Importar ${file.name} como KDBX KeePassXC editável?\n\nKDBX ${info.version} · ${info.cipher} · ${info.kdf} (${detail}).\nO Meu Cofre preservará a árvore de pastas, grupos aninhados e a estrutura avançada, regravando apenas o que for editado.${replaceExisting?' Isso substituirá o cofre local atual.':''}`))return;record=makeStoredRecord(bytes,{external:true,fileName:file.name});wipe(bytes);await putVaultRecord(record);clearSessionMemory();renderUnlockMethods();setPublicScreen('unlock');showToast('KDBX importado sem conversão. A estrutura de pastas do KeePassXC será mantida; depois você poderá editar e exportar no mesmo formato.','success');}catch(e){showToast(`Não foi possível importar: ${e.message||e}`,'error');}finally{for(const id of ['setup-import-kdbx-file','unlock-import-kdbx-file','restore-kdbx-file'])if($(id))$(id).value='';}}
+async function importKdbxFile(file,replaceExisting){if(!file)return;try{const bytes=new Uint8Array(await file.arrayBuffer());const info=inspectKdbx(bytes);const detail=info.kdf==='AES-KDF'?`${Number(info.rounds||0).toLocaleString('pt-BR')} rodadas`:`${info.iterations||'?'} iterações, ${Math.round(Number(info.memoryBytes||0)/1048576)} MiB, p=${info.parallelism||1}`;if(!confirm(`Importar ${file.name} como KDBX KeePassXC editável?\n\nKDBX ${info.version} · ${info.cipher} · ${info.kdf} (${detail}).\nO Meu Cofre preservará a árvore de pastas, grupos aninhados e a estrutura avançada, regravando apenas o que for editado.${replaceExisting?' Isso substituirá o cofre local atual.':''}`))return;record=makeStoredRecord(bytes,{external:true,fileName:file.name});wipe(bytes);await putVaultRecord(record);clearSessionMemory();renderUnlockMethods();setPublicScreen('unlock');showToast('KDBX importado sem conversão. A estrutura de pastas do KeePassXC será mantida; depois você poderá editar e exportar no mesmo formato.','success');return true;}catch(e){showToast(`Não foi possível importar: ${e.message||e}`,'error');return false;}finally{for(const id of ['setup-import-kdbx-file','unlock-import-kdbx-file','restore-kdbx-file'])if($(id))$(id).value='';}}
 
 async function importLegacyBackup(file){if(!file)return;try{const parsed=JSON.parse(await file.text());validateLegacyRecord(parsed);if(!confirm('Restaurar o backup legado neste aparelho?'))return;record=parsed;await putVaultRecord(record);renderUnlockMethods();setPublicScreen('unlock');showToast('Backup legado restaurado. Desbloqueie e migre para KDBX.','success');}catch(e){showToast(`Backup legado inválido: ${e.message||e}`,'error');}finally{$('setup-import-legacy-file').value='';}}
 

@@ -8,8 +8,16 @@ const MAX_EXPORT_BYTES = 128 * 1024 * 1024;
 function u16(b,o){return b[o]|(b[o+1]<<8);}
 function u32(b,o){return (b[o]|(b[o+1]<<8)|(b[o+2]<<16)|(b[o+3]<<24))>>>0;}
 function trimAscii(bytes){return String.fromCharCode(...bytes).replace(/[\u0000\u0020]+$/g,'');}
+// Nomes 8.3 gravados por macOS/Windows usam os bits 0x08/0x10 do byte 12 para
+// dizer que a base e/ou a extensao sao minusculas. Sem isso "leiame.txt" viraria
+// "LEIAME.TXT" e o arquivo exportado sairia com o nome errado.
 function decodeDosName(entry){
-  const base=trimAscii(entry.subarray(0,8)),ext=trimAscii(entry.subarray(8,11));
+  const raw=entry.subarray(0,8).slice();
+  if(raw[0]===0x05)raw[0]=0xe5;
+  let base=trimAscii(raw),ext=trimAscii(entry.subarray(8,11));
+  const flags=entry[12];
+  if(flags&0x08)base=base.toLowerCase();
+  if(flags&0x10)ext=ext.toLowerCase();
   return ext?`${base}.${ext}`:base;
 }
 function lfnPiece(e){
