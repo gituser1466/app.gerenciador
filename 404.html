@@ -9,18 +9,18 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Meu Cofre">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'self'; manifest-src 'self'; media-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'self'; manifest-src 'self'; media-src 'none'">
   <title>Meu Cofre</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=1.7.0">
-  <link rel="icon" href="./icon-192.png?v=1.7.0" sizes="192x192">
-  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=1.7.0">
-  <link rel="stylesheet" href="./styles.css?v=1.7.0">
+  <link rel="manifest" href="./manifest.webmanifest?v=1.8.0">
+  <link rel="icon" href="./icon-192.png?v=1.8.0" sizes="192x192">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png?v=1.8.0">
+  <link rel="stylesheet" href="./styles.css?v=1.8.0">
 </head>
 <body>
   <main class="shell">
     <div class="brand" id="public-brand">
       <div class="brand-mark" aria-hidden="true">MC</div>
-      <div class="brand-copy"><h1>Meu Cofre</h1><p>Privacidade local para KDBX, VeraCrypt e YubiKey</p><small id="public-version" class="hint">v1.7.0</small></div>
+      <div class="brand-copy"><h1>Meu Cofre</h1><p>Privacidade local para KDBX, VeraCrypt e YubiKey</p><small id="public-version" class="hint">v1.8.0</small></div>
     </div>
 
     <section id="screen-home" class="home-screen" hidden>
@@ -258,7 +258,7 @@
         <section class="view" data-view="settings">
           <div class="section"><h3>Bloqueio automático</h3><div class="card stack"><label>Por inatividade (minutos)<input id="setting-idle" type="number" min="1" max="120"></label><label>Ao deixar o app em segundo plano (segundos)<input id="setting-background" type="number" min="0" max="300"></label><label>Limpar área de transferência após (segundos)<input id="setting-clipboard" type="number" min="0" max="300"></label><button class="btn secondary" id="save-settings">Salvar configurações</button></div></div>
           <div class="section"><h3>Armazenamento</h3><div class="card stack"><button class="btn secondary" id="request-persistent">Solicitar armazenamento persistente</button><div id="persistent-status" class="hint"></div></div></div>
-          <div class="section"><h3>Sobre</h3><div class="card stack"><div class="row"><div class="row-main"><div class="row-title">Meu Cofre</div><div class="row-sub">1.7.0 · interface renovada + VeraCrypt no Finder + 2+ YubiKeys + recovery + KDBX</div></div></div><div class="security-note">Sem telemetria, sem CDN e sem servidor de senhas. A hospedagem entrega apenas o código. Um comprometimento da origem web ainda é um risco estrutural de qualquer PWA; proteja sua conta GitHub e o repositório com autenticação forte.</div></div></div>
+          <div class="section"><h3>Sobre</h3><div class="card stack"><div class="row"><div class="row-main"><div class="row-title">Meu Cofre</div><div class="row-sub">1.8.0 · compatibilidade ampliada com KeePassXC + VeraCrypt no Finder + 2+ YubiKeys + recovery</div></div></div><div class="security-note">Sem telemetria, sem CDN e sem servidor de senhas. A hospedagem entrega apenas o código. Um comprometimento da origem web ainda é um risco estrutural de qualquer PWA; proteja sua conta GitHub e o repositório com autenticação forte.</div></div></div>
         </section>
       </div>
       <nav class="bottom-nav" aria-label="Navegação"><button class="nav-btn active" data-nav="vault"><span>⌂</span>Cofre</button><button class="nav-btn" data-nav="generator"><span>✦</span>Gerador</button><button class="nav-btn" id="open-veracrypt-from-app"><span>◇</span>Volumes</button><button class="nav-btn" data-nav="security"><span>⌾</span>Segurança</button><button class="nav-btn" data-nav="settings"><span>⚙</span>Ajustes</button></nav>
@@ -269,6 +269,6 @@
 
   <div id="toast" class="toast" hidden></div>
   <div id="update-banner" class="update-banner" hidden><strong>Atualização disponível</strong><div class="hint">A nova versão só será ativada quando você confirmar.</div><div class="actions"><button class="btn small" id="apply-update">Atualizar agora</button><button class="btn ghost small" id="dismiss-update">Depois</button></div></div>
-  <script type="module" src="./app.js?v=1.7.0"></script>
+  <script type="module" src="./app.js?v=1.8.0"></script>
 </body>
 </html>

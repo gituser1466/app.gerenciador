@@ -1,13 +1,13 @@
-MEU COFRE 1.7.0 — KDBX + VERACRYPT + FIDO2 + MACOS
+MEU COFRE 1.8.0 — KDBX/KEEPASSXC + VERACRYPT + FIDO2 + MACOS
 
-NOVIDADES
-- Interface renovada e mais consistente no iPhone e no Mac.
-- Navegação lateral em telas grandes.
-- Vault vinculado destaca “Montar no Finder”.
-- Volume já montado deixa de aparecer como erro.
-- Helper macOS atualizado para v1.7.0.
+Envie os arquivos desta pasta para a raiz do GitHub Pages, sem criar subpastas.
+Mantenha exatamente o mesmo domínio/origem HTTPS para preservar as credenciais WebAuthn já cadastradas.
 
-IMPORTANTE
-- Mantenha a mesma origem/URL do GitHub Pages para as credenciais WebAuthn.
-- O launcher macOS fornecido separadamente abre essa mesma origem no Safari; ele não copia o cofre para dentro do aplicativo.
-- Esta release foi testada internamente, mas não substitui auditoria criptográfica externa.
+Novo na 1.8:
+- importação KDBX 3.1/4.x preservada byte a byte;
+- AES, Twofish e ChaCha20; AES-KDF, Argon2d e Argon2id;
+- key files KeePassXC XML/raw/hex/arbitrários;
+- YubiKey FIDO2 alternativa por sidecar, sem regravar o KDBX externo.
+
+Limite: Challenge-Response HMAC-SHA1 do KeePassXC não é FIDO2 e continua exigindo integração nativa/KeePassXC.
+O helper VeraCrypt permanece no protocolo v1.7.0 porque essa parte não mudou.

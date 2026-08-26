@@ -1,21 +1,21 @@
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 const CACHE = `meucofre-shell-v${APP_VERSION}`;
 
 // Hashes gerados no fechamento da release. O Service Worker recusa uma instalação
 // parcial/corrompida. Isso protege contra erro de upload/cache; não substitui a
 // segurança da conta/origem de hospedagem, pois quem controla a origem controla o SW.
 const ASSET_HASHES = Object.freeze({
-  './index.html': 'ece70201fad5bd0c5e4c0d510304c0325f31267707285828f5d7545bf883cc5a',
+  './index.html': 'aeee8eed72fffbb7609be1c411ee71ceeb41d10a829ee39ae74d08e1ed703377',
   './styles.css': 'f8e90ad4881797b690caea9fdc70554af0f22b9605c74cba5ec57f1552b31d79',
   './manifest.webmanifest': 'de93d3fb787c8fb0d0d42f4d0dcf88a68900015ca30ae775d88597d824760686',
   './icon-192.png': '8dd0fc36a67b996a4586d795b92510d2f7e22a22d9ba8a4bb0b569653a7c2ad0',
   './icon-512.png': '0c81756a3fed05816ba2c236e75092ccbce3a3c08e3edea9c3253b5abeb7e51e',
   './apple-touch-icon.png': '5e0434ff5e6d4b54a376bb72ee9dfca9eb7cf04d152f6fb275bbb7c558e65e6e',
-  './app.js': 'be293db6dbe283af611ba6f1e0b13365368109846ba925add74655fd88f11923',
+  './app.js': '4b12545c2805770f7fd7aaf4127c67e0c54f90077e05ec631fa1817760f59380',
   './utils.js': 'fb5a397fda790ba7f596b6eb2ca1e8a72bb67578eaa0c406f466205cafa8a70b',
   './storage.js': 'c37814b23abd14e0ac49f56837ec9decbcd74a3657ec30c130a763e1b902da21',
   './legacy-vault.js': 'd663a38de94a994c4ba1a713a6934556327b192464fb9867bff145b0826481f3',
-  './kdbx.js': 'b7b2a13ce646da1d2103a4af04bb5d57d686e958db563a343f2fd81489955ff0',
+  './kdbx.js': 'a0115590c0f6e294c869acb4eb51e11868a2b98353d5d372f169e3699226aec6',
   './webauthn.js': 'a4e9bb9fbea5780f341e034dc64737b6838755a00482c92f0614c59345a59f36',
   './totp.js': '137058587a6d0db77a751f7731b8795baf0cfff3ebb70e550dc6a36144a80679',
   './generator.js': '81197ae74f52857dbcaa61581b462a7a442c4c909d045d9b2708490610582085',
@@ -27,6 +27,9 @@ const ASSET_HASHES = Object.freeze({
   './filesystem.js': '4bb193f2ad835914a0306eea120821106765d1f0f223f3a8baf874afdde20755',
   './fat.js': '82ea09aacd1360efb5fa6a1ecba33d7ef36e892239c9a517d2fddc5dc870b5b9',
   './exfat.js': '443184ffcc20b2a9f9ff050d5beb6f1cef8fb3435e05c1c18de75d21c6fcdc05',
+  './argon2-kdf.js': '7a496b993062f6b636b41d5fa76a850716d83e10ac9c14bda71977d339d542a5',
+  './argon2-kdf.wasm': '9720380a7e99573f7d3df22e884f8dc128200519c6e91ad5886fa5414935a6bf',
+  './twofish.js': '66bd42171ae2d1a196afbcb2eb3b70262f6307a448f64e697adcabdeeaf0c9aa',
   './MeuCofre-VeraCrypt-macOS.command': 'b5eae1601b027449342dd0a65ddfbced721b5a0f0aceddacf1209e5ff058eeab'
 });
 
